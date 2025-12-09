@@ -1,0 +1,120 @@
+import React, { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+
+export default function Register() {
+  const [form, setForm] = useState({
+    name: "",
+    age: "",
+    email: "",
+    password: "",
+    role: "patient",
+  });
+
+  const handleChange = (e) => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  const navigate = useNavigate();
+  const { login } = useAuth();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch("http://localhost:5000/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert("✔ Registered successfully!");
+        // use centralized auth to store token/user
+        login({ token: data.token, user: data.user, remember: true });
+        if (data.user?.role === "therapist") navigate("/therapist");
+        else navigate("/patient");
+      } else {
+        alert("❌ " + (data.message || "Registration failed"));
+      }
+    } catch (err) {
+      alert("❌ Server error!");
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-gray-900">
+      <form
+        onSubmit={handleSubmit}
+        className="bg-gray-800 shadow-2xl rounded-2xl p-8 w-full max-w-md"
+      >
+        <h1 className="text-3xl font-bold text-center text-white mb-6">
+          RodRecover Registration 🩺
+        </h1>
+
+        <input
+          type="text"
+          name="name"
+          placeholder="Full Name"
+          value={form.name}
+          onChange={handleChange}
+          className="w-full bg-transparent border-b border-gray-600 px-4 py-2 mb-4 focus:outline-none text-white"
+          required
+        />
+
+        <input
+          type="number"
+          name="age"
+          placeholder="Age"
+          value={form.age}
+          onChange={handleChange}
+          className="w-full bg-transparent border-b border-gray-600 px-4 py-2 mb-4 focus:outline-none text-white"
+          required
+        />
+
+        <input
+          type="email"
+          name="email"
+          placeholder="Email"
+          value={form.email}
+          onChange={handleChange}
+          className="w-full bg-transparent border-b border-gray-600 px-4 py-2 mb-4 focus:outline-none text-white"
+          required
+        />
+
+        <input
+          type="password"
+          name="password"
+          placeholder="Password"
+          value={form.password}
+          onChange={handleChange}
+          className="w-full bg-transparent border-b border-gray-600 px-4 py-2 mb-4 focus:outline-none text-white"
+          required
+        />
+
+        <select
+          name="role"
+          value={form.role}
+          onChange={handleChange}
+          className="w-full bg-gray-800 border-b border-gray-600 px-4 py-2 mb-6 text-white"
+        >
+          <option value="patient">Patient</option>
+          <option value="therapist">Therapist</option>
+        </select>
+
+        <button
+          type="submit"
+          className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 transition duration-200"
+        >
+          Register
+        </button>
+        <div className="text-center text-sm text-gray-700 mt-4">
+          Already have an account?{' '}
+          <Link to="/login" className="text-blue-600 underline">
+            Login
+          </Link>
+        </div>
+      </form>
+    </div>
+  );
+}

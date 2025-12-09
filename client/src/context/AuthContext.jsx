@@ -1,0 +1,130 @@
+import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+
+const AuthContext = createContext(null);
+
+export function AuthProvider({ children }) {
+  // Read token/user synchronously from storage to avoid transient unauthenticated state
+  const initialToken = localStorage.getItem("token") || sessionStorage.getItem("token");
+  const initialUser = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || sessionStorage.getItem("user") || 'null');
+    } catch (e) { return null; }
+  })();
+
+  const [user, setUser] = useState(initialUser);
+  const [token, setToken] = useState(initialToken);
+  const [notificationsUnread, setNotificationsUnread] = useState(0);
+  const [messagesUnread, setMessagesUnread] = useState(0);
+  const [indicatorsLoading, setIndicatorsLoading] = useState(false);
+
+  // If token exists but we don't have a user object (edge case), fetch the profile once
+  useEffect(() => {
+    let mounted = true;
+    const fetchProfile = async () => {
+      if (!token || user) return;
+      try {
+        const res = await fetch('http://localhost:5000/api/user/me', { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return;
+        const j = await res.json();
+        if (j.success && mounted) {
+          setUser(j.user || null);
+          // persist in same storage as token
+          if (localStorage.getItem('token') === token) localStorage.setItem('user', JSON.stringify(j.user));
+          else sessionStorage.setItem('user', JSON.stringify(j.user));
+        }
+      } catch (e) { /* ignore */ }
+    };
+    fetchProfile();
+    return () => { mounted = false; };
+  }, [token, user]);
+
+  const login = ({ token: newToken, user: newUser, remember }) => {
+    if (remember) {
+      localStorage.setItem("token", newToken);
+      if (newUser) localStorage.setItem("user", JSON.stringify(newUser));
+    } else {
+      sessionStorage.setItem("token", newToken);
+      if (newUser) sessionStorage.setItem("user", JSON.stringify(newUser));
+    }
+    setToken(newToken);
+    setUser(newUser || null);
+    // Trigger immediate indicators refresh
+    setTimeout(() => refreshIndicators(), 50);
+  };
+
+  const logout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    sessionStorage.removeItem("token");
+    sessionStorage.removeItem("user");
+    setToken(null);
+    setUser(null);
+    setNotificationsUnread(0);
+    setMessagesUnread(0);
+  };
+
+  const isAuthenticated = !!token;
+
+  const authFetch = (url, opts = {}) => {
+    const headers = opts.headers ? { ...opts.headers } : {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    return fetch(url, { ...opts, headers });
+  };
+
+  const refreshIndicators = useCallback(async () => {
+    if (!token) return;
+    try {
+      setIndicatorsLoading(true);
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const r = await fetch('http://localhost:5000/api/indicators', { headers });
+      if (r.ok) {
+        const j = await r.json();
+        if (j.success) {
+          setNotificationsUnread(j.notificationsUnread);
+          setMessagesUnread(j.messagesUnread);
+        }
+      }
+    } catch (e) { /* silent */ }
+    finally { setIndicatorsLoading(false); }
+  }, [token]);
+
+  // Poll indicators periodically
+  useEffect(() => {
+    if (!token) return; // only when logged in
+    let interval = setInterval(() => refreshIndicators(), 30000); // 30s
+    refreshIndicators();
+    return () => clearInterval(interval);
+  }, [token, refreshIndicators]);
+
+  // Expose optimistic update helpers
+  const decrementNotifications = () => setNotificationsUnread(v => Math.max(0, v - 1));
+  const decrementMessages = () => setMessagesUnread(v => Math.max(0, v - 1));
+  const incrementMessages = () => setMessagesUnread(v => v + 1);
+
+  return (
+    <AuthContext.Provider value={{
+      user,
+      token,
+      login,
+      logout,
+      isAuthenticated,
+      authFetch,
+      notificationsUnread,
+      messagesUnread,
+      refreshIndicators,
+      indicatorsLoading,
+      decrementNotifications,
+      decrementMessages,
+      incrementMessages
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  return useContext(AuthContext);
+}
+
+export default AuthContext;
