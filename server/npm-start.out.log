@@ -1,0 +1,9 @@
+
+> server@1.0.0 start
+> node server.js
+
+Starting RodRecover backend...
+Fitbit client not configured (no FITBIT_CLIENT_ID in env).
+Mongo URI from .env: mongodb+srv://roduser:Rodney2002@rodrecover.wrgixhj.mongodb.net/rodrecover?retryWrites=true&w=majority&appName=rodrecover
+Server running on port 5000
+MongoDB Connected to Atlas

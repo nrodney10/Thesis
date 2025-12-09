@@ -6,6 +6,8 @@ import { Link } from "react-router-dom";
 export default function PatientDashboard() {
   const { authFetch, user, logout, notificationsUnread, messagesUnread } = useAuth();
   const [results, setResults] = useState([]);
+  const [visibleCount, setVisibleCount] = useState(6);
+  const [expandedIds, setExpandedIds] = useState(new Set());
   const [loading, setLoading] = useState(false);
   const [heartRate, setHeartRate] = useState(null);
   const [fallbackHR, setFallbackHR] = useState(null); // last available from prior days
@@ -182,15 +184,75 @@ export default function PatientDashboard() {
               ) : results.length === 0 ? (
                 <p className="text-gray-400">No results yet.</p>
               ) : (
-                <ul className="space-y-2">
-                  {results.map((r) => (
-                    <li key={r._id} className="p-2 bg-gray-900 rounded">
-                      <div className="text-sm text-gray-300">Type: {r.type}</div>
-                      <div className="text-sm text-gray-300">Score: {r.score}</div>
-                      <div className="text-xs text-gray-500">{new Date(r.createdAt).toLocaleString()}</div>
-                    </li>
-                  ))}
-                </ul>
+                <div>
+                  <ul className="space-y-2">
+                    {results.slice(0, visibleCount).map((r) => {
+                      const isOpen = expandedIds.has(r._id);
+                      return (
+                        <li key={r._id} className="card result-card flex flex-col">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="text-sm text-gray-200 font-medium">{r.title || r.type || 'Result'}</div>
+                              <div className="text-xs text-gray-400">{new Date(r.createdAt).toLocaleString()}</div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-sm font-semibold text-white">{r.score ?? '—'}</div>
+                              <button
+                                onClick={() => {
+                                  const s = new Set(expandedIds);
+                                  if (s.has(r._id)) s.delete(r._id); else s.add(r._id);
+                                  setExpandedIds(s);
+                                }}
+                                className="text-sm px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                              >
+                                {isOpen ? 'Hide' : 'Details'}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className={`collapse mt-2 ${isOpen ? 'open' : ''}`}>
+                            <div className="collapse-inner">
+                              {r.metadata?.video && (
+                                <div className="text-sm text-gray-300 mb-2">Video: <a href={r.metadata.video} target="_blank" rel="noreferrer" className="text-indigo-300 underline">View clip</a></div>
+                              )}
+                              {r.metadata?.poseMetrics && (
+                                <div className="text-sm text-gray-300">
+                                  <div>Reps: {r.metadata.poseMetrics.reps ?? 0}</div>
+                                  <div>Avg angle: {r.metadata.poseMetrics.avgAngle ? Math.round(r.metadata.poseMetrics.avgAngle) + '°' : '—'}</div>
+                                  <div>Cadence: {r.metadata.poseMetrics.cadence ? Math.round(r.metadata.poseMetrics.cadence) + '/min' : '—'}</div>
+                                  {r.metadata.poseMetrics.quality && (
+                                    <div>Quality: {Array.isArray(r.metadata.poseMetrics.quality) ? r.metadata.poseMetrics.quality.join(', ') : String(r.metadata.poseMetrics.quality)}</div>
+                                  )}
+                                </div>
+                              )}
+                              {(!r.metadata?.video && !r.metadata?.poseMetrics) && (
+                                <div className="text-sm text-gray-400">No extra details available.</div>
+                              )}
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+
+                  <div className="mt-3 text-center">
+                    {visibleCount < results.length ? (
+                      <button
+                        onClick={() => setVisibleCount(Math.min(results.length, visibleCount + 6))}
+                        className="px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 text-sm"
+                      >
+                        Load more (+6)
+                      </button>
+                    ) : results.length > 6 ? (
+                      <button
+                        onClick={() => { setVisibleCount(6); setExpandedIds(new Set()); }}
+                        className="px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 text-sm"
+                      >
+                        Show less
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
               )}
             </div>
           </main>

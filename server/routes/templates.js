@@ -84,4 +84,21 @@ router.post('/:id/instantiate', verifyToken, async (req, res) => {
   }
 });
 
+// Delete a template (therapist only)
+router.delete('/:id', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
+    const { id } = req.params;
+    const tpl = await ExerciseTemplate.findById(id);
+    if (!tpl) return res.status(404).json({ success: false, error: 'Template not found' });
+    if (tpl.createdBy?.toString() !== req.user.id) return res.status(403).json({ success: false, error: 'Not allowed to delete this template' });
+
+    await ExerciseTemplate.deleteOne({ _id: tpl._id });
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('DELETE /api/templates/:id', e);
+    return res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
 export default router;

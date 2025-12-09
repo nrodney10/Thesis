@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import Exercise from '../models/Exercise.js';
 import { verifyToken } from '../middleware/authMiddleware.js';
 import User from '../models/User.js';
@@ -52,6 +53,59 @@ router.post('/', verifyToken, async (req, res) => {
     res.json({ success: true, exercise: ex });
   } catch (err) {
     console.error('POST /api/exercises error', err);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// DELETE /api/exercises/patient/:patientId
+// Therapist selects exercises to remove for a specific patient.
+// If an exercise is only assigned to that patient it is deleted; otherwise the patient assignment is removed.
+router.delete('/patient/:patientId', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
+
+    const { patientId } = req.params;
+    const { exerciseIds } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(patientId)) return res.status(400).json({ success: false, error: 'Invalid patient ID' });
+    if (!Array.isArray(exerciseIds) || exerciseIds.length === 0) return res.status(400).json({ success: false, error: 'exerciseIds array is required' });
+
+    const patient = await User.findById(patientId);
+    if (!patient || patient.role !== 'patient') return res.status(404).json({ success: false, error: 'Patient not found' });
+
+    // filter out invalid ids to avoid CastErrors
+    const validIds = exerciseIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+    if (validIds.length === 0) return res.status(400).json({ success: false, error: 'No valid exercise IDs provided' });
+
+    const exercises = await Exercise.find({ _id: { $in: validIds }, assignedTo: patientId, createdBy: req.user.id });
+
+    let removedAssignments = 0;
+    let deletedExercises = 0;
+    const processed = new Set();
+
+    for (const ex of exercises) {
+      processed.add(String(ex._id));
+      const remainingAssignees = ex.assignedTo.filter((uid) => String(uid) !== patientId);
+      if (remainingAssignees.length === 0) {
+        await ex.deleteOne();
+        deletedExercises += 1;
+      } else {
+        ex.assignedTo = remainingAssignees;
+        await ex.save();
+        removedAssignments += 1;
+      }
+    }
+
+    const notFound = validIds.filter((id) => !processed.has(String(id)));
+
+    res.json({
+      success: true,
+      removedAssignments,
+      deletedExercises,
+      notFound
+    });
+  } catch (err) {
+    console.error('DELETE /api/exercises/patient/:patientId error', err);
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });

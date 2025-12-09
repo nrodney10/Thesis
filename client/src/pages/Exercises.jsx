@@ -8,6 +8,11 @@ export default function Exercises() {
   const { push } = useToast();
   const [exercises, setExercises] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [patients, setPatients] = useState([]);
+  const [patientsLoading, setPatientsLoading] = useState(false);
+  const [selectedPatientId, setSelectedPatientId] = useState('');
+  const [selectedExerciseIds, setSelectedExerciseIds] = useState(new Set());
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const fetchExercises = async () => {
     setLoading(true);
@@ -24,12 +29,94 @@ export default function Exercises() {
     setLoading(false);
   };
 
+  const fetchPatients = async () => {
+    setPatientsLoading(true);
+    try {
+      const res = await authFetch('http://localhost:5000/api/patients');
+      const data = await res.json();
+      if (data.success) setPatients(data.patients || []);
+    } catch (err) {
+      console.error('Failed to load patients', err);
+      push('Failed to load patients', 'error');
+    }
+    setPatientsLoading(false);
+  };
+
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchExercises();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (user?.role === 'therapist') {
+      fetchPatients();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role]);
+
+  const isAssignedToPatient = (exercise, patientId) =>
+    (exercise.assignedTo || []).some((uid) => {
+      if (uid && typeof uid === 'object' && uid._id) return String(uid._id) === patientId;
+      return String(uid) === patientId;
+    });
+
+  const patientExercises = selectedPatientId
+    ? exercises.filter((ex) => isAssignedToPatient(ex, selectedPatientId))
+    : [];
+
+  const toggleSelection = (exerciseId) => {
+    setSelectedExerciseIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(exerciseId)) next.delete(exerciseId);
+      else next.add(exerciseId);
+      return next;
+    });
+  };
+
+  const resetSelection = () => setSelectedExerciseIds(new Set());
+
+  useEffect(() => {
+    resetSelection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPatientId]);
+
+  const handleDelete = async () => {
+    if (!selectedPatientId || selectedExerciseIds.size === 0) return;
+    setDeleteLoading(true);
+    try {
+      const res = await authFetch(`http://localhost:5000/api/exercises/patient/${selectedPatientId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exerciseIds: Array.from(selectedExerciseIds) })
+      });
+      const data = await res.json();
+      if (data.success) {
+        const removedCount = (data.removedAssignments || 0) + (data.deletedExercises || 0);
+        push(`Removed ${removedCount} exercise${removedCount === 1 ? '' : 's'} for patient`, 'success');
+        await fetchExercises();
+        resetSelection();
+      } else {
+        push(data.error || 'Failed to delete exercises', 'error');
+      }
+    } catch (err) {
+      console.error('Failed to delete exercises', err);
+      push('Failed to delete exercises', 'error');
+    }
+    setDeleteLoading(false);
+  };
+
+  const patientName = (id) => patients.find((p) => p._id === id)?.name || 'selected patient';
+
+  const formatAssignees = (assignedTo = []) => {
+    if (!assignedTo.length) return 'Unassigned';
+    const names = assignedTo.map((uid) => {
+      const id = uid && typeof uid === 'object' && uid._id ? String(uid._id) : String(uid);
+      return patients.find((p) => p._id === id)?.name || 'Unknown';
+    });
+    return names.join(', ');
+  };
 
   // Therapist view: create and manage exercises
   if (user?.role === 'therapist') {
@@ -43,6 +130,65 @@ export default function Exercises() {
             <button onClick={fetchExercises} className="ml-3 bg-gray-700 text-white px-3 py-2 rounded">Refresh</button>
             <Link to="/templates" className="ml-3 bg-gray-700 text-white px-3 py-2 rounded">Templates</Link>
           </div>
+          <div className="mb-6 p-4 bg-gray-900 rounded border border-gray-700">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div>
+                <div className="text-lg font-semibold">Delete exercises for a patient</div>
+                <p className="text-sm text-gray-400">Select a patient to see their assigned exercises and choose which ones to remove.</p>
+              </div>
+              <label className="text-sm">
+                <span className="text-gray-300 mr-2">Patient</span>
+                <select
+                  value={selectedPatientId}
+                  onChange={(e) => setSelectedPatientId(e.target.value)}
+                  className="bg-gray-700 text-white px-3 py-2 rounded"
+                  disabled={patientsLoading}
+                >
+                  <option value="">{patientsLoading ? 'Loading patients...' : 'Select patient'}</option>
+                  {patients.map((p) => (
+                    <option key={p._id} value={p._id}>{p.name}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {selectedPatientId && (
+              <div className="mt-4">
+                {loading ? <p>Loading exercises...</p> : patientExercises.length === 0 ? (
+                  <p className="text-gray-400 text-sm">No exercises assigned to {patientName(selectedPatientId)}.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {patientExercises.map((ex) => (
+                      <li key={ex._id} className="p-3 bg-gray-800 rounded flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-medium">{ex.title}</div>
+                          <div className="text-xs text-gray-400">{ex.description}</div>
+                          <div className="text-xs text-gray-500 mt-1">Assigned to: {formatAssignees(ex.assignedTo)}</div>
+                        </div>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={selectedExerciseIds.has(ex._id)}
+                            onChange={() => toggleSelection(ex._id)}
+                          />
+                          <span>Delete</span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={handleDelete}
+                    disabled={selectedExerciseIds.size === 0 || deleteLoading}
+                    className={`px-4 py-2 rounded ${selectedExerciseIds.size === 0 || deleteLoading ? 'bg-gray-700 text-gray-400' : 'bg-red-600 text-white'}`}
+                  >
+                    {deleteLoading ? 'Deleting...' : `Delete selected (${selectedExerciseIds.size})`}
+                  </button>
+                  <button onClick={resetSelection} className="px-3 py-2 rounded bg-gray-700 text-white">Clear selection</button>
+                </div>
+              </div>
+            )}
+          </div>
           <div>
             <h2 className="text-lg font-semibold mb-2">Existing exercises</h2>
             {loading ? <p>Loading...</p> : exercises.length === 0 ? <p className="text-gray-400">No exercises yet.</p> : (
@@ -51,6 +197,7 @@ export default function Exercises() {
                   <li key={ex._id} className="p-2 bg-gray-900 rounded">
                     <div className="font-medium">{ex.title}</div>
                     <div className="text-xs text-gray-400">{ex.description}</div>
+                    <div className="text-xs text-gray-500 mt-1">Assigned to: {formatAssignees(ex.assignedTo)}</div>
                   </li>
                 ))}
               </ul>
@@ -71,19 +218,19 @@ export default function Exercises() {
           <p className="text-gray-400">No exercises assigned yet.</p>
         ) : (
           <ul className="space-y-3">
-              {exercises.map((ex) => (
-                <li key={ex._id} className="p-3 bg-gray-900 rounded">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <div className="font-medium text-white">{ex.title}</div>
-                      <div className="text-xs text-gray-400">{ex.description}</div>
-                    </div>
-                    <div className="text-sm">
-                      <button onClick={() => navigate('/exercises/run', { state: { exercise: ex } })} className="bg-indigo-600 px-3 py-1 rounded text-white">Start</button>
-                    </div>
+            {exercises.map((ex) => (
+              <li key={ex._id} className="p-3 bg-gray-900 rounded">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <div className="font-medium text-white">{ex.title}</div>
+                    <div className="text-xs text-gray-400">{ex.description}</div>
                   </div>
-                </li>
-              ))}
+                  <div className="text-sm">
+                    <button onClick={() => navigate('/exercises/run', { state: { exercise: ex } })} className="bg-indigo-600 px-3 py-1 rounded text-white">Start</button>
+                  </div>
+                </div>
+              </li>
+            ))}
           </ul>
         )}
       </div>

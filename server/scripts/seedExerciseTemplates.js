@@ -39,7 +39,7 @@ async function run(){
           targets: {
             type: 'tpose',
             allowedRotation: 12,
-            correctMsg: 'Nice and steady — great T pose!',
+            correctMsg: 'Nice and steady - great T pose!',
             incorrectMsg: 'Keep your arms straight out to the sides, please.'
           }
         }
@@ -51,12 +51,12 @@ async function run(){
     }
 
     // Elbow 90 deg template
-    const eTitle = 'Elbow 90° Hold';
+    const eTitle = 'Elbow 90 deg Hold';
     let etpl = await ExerciseTemplate.findOne({ title: eTitle, createdBy: therapist._id });
     if (!etpl) {
       etpl = new ExerciseTemplate({
         title: eTitle,
-        description: 'Hold elbow at ~90 degrees. Voice coaching will prompt corrections when outside ±5°.',
+        description: 'Hold elbow at ~90 degrees. Voice coaching will prompt corrections when outside +/-5 degrees.',
         category: 'upper-body',
         createdBy: therapist._id,
         poseConfig: {
@@ -66,7 +66,7 @@ async function run(){
           targets: {
             type: 'range',
             targetRange: [85, 95],
-            correctMsg: 'Good — hold that 90 degrees.',
+            correctMsg: 'Good - hold that 90 degrees.',
             incorrectMsg: 'Adjust your elbow to about 90 degrees.'
           }
         }
@@ -75,6 +75,33 @@ async function run(){
       console.log('Created template:', eTitle);
     } else {
       console.log('Template already exists:', eTitle);
+    }
+
+    // Bodyweight squat template
+    const sTitle = 'Bodyweight Squat Hold';
+    let stpl = await ExerciseTemplate.findOne({ title: sTitle, createdBy: therapist._id });
+    if (!stpl) {
+      stpl = new ExerciseTemplate({
+        title: sTitle,
+        description: 'Hold a squat with knees roughly 80-100 degrees, chest tall, and arms parallel to the floor.',
+        category: 'lower-body',
+        createdBy: therapist._id,
+        poseConfig: {
+          joints: 'knee',
+          smoothing: 0.22,
+          minRepTimeMs: 700,
+          targets: {
+            type: 'squat',
+            kneeRange: [80, 100],
+            torsoMaxLean: 25,
+            armMaxTilt: 25
+          }
+        }
+      });
+      await stpl.save();
+      console.log('Created template:', sTitle);
+    } else {
+      console.log('Template already exists:', sTitle);
     }
 
     console.log('Seed templates complete.');
