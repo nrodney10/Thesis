@@ -2,11 +2,11 @@ import mongoose from 'mongoose';
 
 const poseConfigSchema = new mongoose.Schema({
   joints: { type: String, enum: ['knee', 'arm', 'shoulder'], default: 'knee' },
-  upAngle: { type: Number, default: 90 },
-  downAngle: { type: Number, default: 140 },
+  upAngle: { type: Number },
+  downAngle: { type: Number },
   smoothing: { type: Number, default: 0.2 },
-  minRepTimeMs: { type: Number, default: 400 }
-  , targets: { type: Object }
+  minRepTimeMs: { type: Number, default: 400 },
+  targets: { type: Object }
 }, { _id: false });
 
 const ExerciseTemplateSchema = new mongoose.Schema({

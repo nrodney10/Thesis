@@ -7,24 +7,24 @@ export default function Header() {
   const { user, isAuthenticated, logout, messagesUnread, notificationsUnread } = useAuth();
 
   return (
-    <header className="w-full bg-slate-900 text-gray-100 border-b border-slate-800">
+    <header className="w-full sticky top-0 z-20 bg-white/70 backdrop-blur border-b border-gray-200 shadow-sm">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
         <Link to="/" className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-teal-500 flex items-center justify-center font-bold text-white">RR</div>
+          <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center font-bold text-white shadow-md">RR</div>
           <div className="hidden sm:block">
-            <div className="text-lg font-bold">RodRecover</div>
-            <div className="text-xs text-gray-400">Rehab platform</div>
+            <div className="text-lg font-bold text-slate-900">RodRecover</div>
+            <div className="text-xs text-gray-500">Rehab platform</div>
           </div>
         </Link>
 
-        <nav className="hidden md:flex gap-6 items-center text-sm">
-          <Link to="/exercises" className="hover:underline">Exercises</Link>
-          <Link to="/games" className="hover:underline">Games</Link>
-          <Link to="/reports" className="hover:underline">Reports</Link>
-          <Link to="/messages" className="flex items-center gap-2 hover:underline">
+        <nav className="hidden md:flex gap-6 items-center text-sm text-gray-700">
+          <Link to="/exercises" className="hover:text-blue-600 transition">Exercises</Link>
+          <Link to="/games" className="hover:text-blue-600 transition">Games</Link>
+          <Link to="/reports" className="hover:text-blue-600 transition">Reports</Link>
+          <Link to="/messages" className="flex items-center gap-2 hover:text-blue-600 transition">
             Messages <UnreadBadge count={messagesUnread} />
           </Link>
-          <Link to="/notifications" className="flex items-center gap-2 hover:underline">
+          <Link to="/notifications" className="flex items-center gap-2 hover:text-blue-600 transition">
             Notifications <UnreadBadge count={notificationsUnread} />
           </Link>
         </nav>
@@ -32,11 +32,11 @@ export default function Header() {
         <div className="ml-4 flex items-center gap-3">
           {isAuthenticated ? (
             <>
-              <div className="text-sm text-gray-300">{user?.name || user?.email || 'User'}</div>
-              <button onClick={logout} className="text-sm px-3 py-1 rounded bg-gray-800 hover:bg-gray-700">Sign out</button>
+              <div className="text-sm text-gray-700">{user?.name || user?.email || 'User'}</div>
+              <button onClick={logout} className="text-sm px-3 py-1 rounded-full bg-blue-600 text-white shadow hover:bg-blue-500 transition">Sign out</button>
             </>
           ) : (
-            <Link to="/login" className="text-sm px-3 py-1 rounded bg-indigo-600 hover:bg-indigo-500">Sign in</Link>
+            <Link to="/login" className="text-sm px-3 py-1 rounded-full bg-blue-600 text-white shadow hover:bg-blue-500 transition">Sign in</Link>
           )}
         </div>
       </div>

@@ -32,6 +32,8 @@ const poseMetricsSchema = z.object({
   usedSide: z.enum(["left", "right"]).optional(),
   cadence: z.number().optional(),
   quality: z.array(z.number()).optional(),
+  correctReps: z.number().optional(),
+  incorrectReps: z.number().optional(),
 }).strict().optional();
 
 const metadataSchema = z.object({

@@ -31,7 +31,25 @@ router.get('/', verifyToken, async (req, res) => {
 router.post('/', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
-    const { title, description, assignedTo = [], metadata = {}, poseConfig = {}, dueAt, dailyReminder } = req.body;
+    const { title, description, assignedTo = [], metadata = {}, dueAt, dailyReminder } = req.body;
+    const poseConfig = (() => {
+      const cfg = req.body.poseConfig && typeof req.body.poseConfig === 'object' ? { ...req.body.poseConfig } : {};
+      for (const k of Object.keys(cfg)) {
+        if (cfg[k] === '' || cfg[k] === null || cfg[k] === undefined) delete cfg[k];
+      }
+      if (cfg.targets && typeof cfg.targets === 'object') {
+        for (const k of Object.keys(cfg.targets)) {
+          const v = cfg.targets[k];
+          if (v === '' || v === null || v === undefined) delete cfg.targets[k];
+        }
+        if (Array.isArray(cfg.targets.kneeRange)) {
+          const [a, b] = cfg.targets.kneeRange;
+          if (!Number.isFinite(a) || !Number.isFinite(b)) delete cfg.targets.kneeRange;
+        }
+        if (Object.keys(cfg.targets).length === 0) delete cfg.targets;
+      }
+      return cfg;
+    })();
     if (!title || typeof title !== 'string' || title.length < 3) return res.status(400).json({ success: false, error: 'Title is required (min 3 chars)' });
 
     // validate assignedTo are existing users

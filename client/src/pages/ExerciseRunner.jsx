@@ -26,7 +26,7 @@ export default function ExerciseRunner() {
   const recordedChunksRef = useRef([]);
   const detectorRef = useRef(null);
   const poseLoopRef = useRef(null);
-  const poseMetricsRef = useRef({
+  const makePoseMetrics = () => ({
     reps: 0,
     lastAngle: null,
     state: 'down',
@@ -43,9 +43,14 @@ export default function ExerciseRunner() {
     usedSide: null,
     prevLevel: null,
     praised: false,
+    correctReps: 0,
+    incorrectReps: 0,
+    bottomEnteredAt: null,
   });
+  const poseMetricsRef = useRef(makePoseMetrics());
   const repQualityRef = useRef([]);
-  const [, setFeedback] = useState({ level: 'info', message: 'Ready' });
+  const [feedback, setFeedback] = useState({ level: 'info', message: 'Ready' });
+  const [repStats, setRepStats] = useState({ correct: 0, incorrect: 0 });
   const [backend, setBackend] = useState('');
   const [poseDiag, setPoseDiag] = useState({ lastError: null, attempted: [], backend: null });
   const [voiceEnabled, setVoiceEnabled] = useState(false);
@@ -233,7 +238,8 @@ export default function ExerciseRunner() {
     } catch (e) { console.warn(e); }
     detectorRef.current = null;
     poseLoopRef.current = null;
-    poseMetricsRef.current = { reps: 0, lastAngle: null, state: 'down', smoothedAngle: null, lastRepTime: 0, minAngle: Infinity, maxAngle: -Infinity, sumAngle: 0, sampleCount: 0, timeInTargetMs: 0, lastSampleTime: null, inRange: false, usedSide: null, prevLevel: null };
+    poseMetricsRef.current = makePoseMetrics();
+    setRepStats({ correct: 0, incorrect: 0 });
   }
 
   async function poseFrame() {
@@ -255,8 +261,8 @@ export default function ExerciseRunner() {
     if (baseCfg.targets?.type === 'squat') guessedJoints = 'knee';
     return {
       joints: guessedJoints,
-      upAngle: baseCfg.upAngle ?? 90,
-      downAngle: baseCfg.downAngle ?? 140,
+      upAngle: baseCfg.upAngle,
+      downAngle: baseCfg.downAngle,
       smoothing: baseCfg.smoothing ?? 0.2,
       minRepTimeMs: baseCfg.minRepTimeMs ?? 400,
       targets: baseCfg.targets
@@ -266,7 +272,7 @@ export default function ExerciseRunner() {
   function processPose(pose) {
     const cfg = getPoseConfig();
     const targetType = cfg.targets?.type;
-    const isStaticHold = targetType === 'tpose' || targetType === 'squat';
+    const isStaticHold = targetType === 'tpose';
     
     // Select keypoints based on joint config; choose the better-visible side
     const key = pose.keypoints || [];
@@ -317,28 +323,41 @@ export default function ExerciseRunner() {
 
     // State machine with debouncing (skip for static holds like T-pose or squat hold)
     if (!isStaticHold) {
-      const upThreshold = cfg.upAngle ?? 90;
-      const downThreshold = cfg.downAngle ?? 140;
+      // derive thresholds from therapist inputs (prefer explicit up/down; else use knee range for squats)
+      let upThreshold = cfg.upAngle;
+      let downThreshold = cfg.downAngle;
+      if ((!Number.isFinite(upThreshold) || !Number.isFinite(downThreshold)) && cfg.targets?.type === 'squat' && Array.isArray(cfg.targets.kneeRange)) {
+        const [minKnee, maxKnee] = cfg.targets.kneeRange;
+        if (Number.isFinite(minKnee) && Number.isFinite(maxKnee)) {
+          upThreshold = minKnee;
+          downThreshold = maxKnee;
+        }
+      }
       const minRepTime = cfg.minRepTimeMs ?? 400;
       const now = Date.now();
+      const thresholdsReady = Number.isFinite(upThreshold) && Number.isFinite(downThreshold);
 
-      if (metrics.state === 'down' && smoothed < upThreshold) {
+      // Detect entering bottom position
+      if (thresholdsReady && metrics.state === 'down' && smoothed < upThreshold) {
         metrics.state = 'up';
-        // encourage user to lift further if near threshold
+        metrics.bottomEnteredAt = now;
         if (smoothed < upThreshold - 10) speak(cfg.joints === 'arm' ? 'Raise your arm higher.' : 'Go lower.');
-      } else if (metrics.state === 'up' && smoothed > downThreshold) {
+      } else if (thresholdsReady && metrics.state === 'up' && smoothed > downThreshold) {
+        const heldLongEnough = metrics.bottomEnteredAt ? (now - metrics.bottomEnteredAt) >= 2000 : false;
         // Check debounce before counting rep
         if ((now - metrics.lastRepTime) > minRepTime) {
-          // record quality for this rep
           const fb = evaluateForm(smoothed, cfg, key, { chosenSide, rawAngle: angle });
-          const score = fb.level === 'good' ? 1 : fb.level === 'caution' ? 0.6 : 0.2;
+          const score = (heldLongEnough && (fb.inRange === true || fb.level === 'good')) ? 1 : 0.2;
           repQualityRef.current.push(score);
           metrics.reps += 1;
+          if (score >= 0.8) metrics.correctReps += 1; else metrics.incorrectReps += 1;
           metrics.lastRepTime = now;
           setReps(metrics.reps);
-          speak('Good job!', { minGapMs: 1200 });
+          setRepStats({ correct: metrics.correctReps, incorrect: metrics.incorrectReps });
+          speak(score >= 0.8 ? 'Great hold!' : 'Hold longer at the bottom.', { minGapMs: 1200 });
         }
         metrics.state = 'down';
+        metrics.bottomEnteredAt = null;
       }
     } else {
       metrics.state = 'hold';
@@ -368,7 +387,7 @@ export default function ExerciseRunner() {
       }
       metrics.prevLevel = cont.level;
     }
-    setFeedback(cont);
+    setFeedback((prev) => (prev.level === cont.level && prev.message === cont.message ? prev : cont));
   }
 
   function calcAngle(a, b, c) {
@@ -386,12 +405,15 @@ export default function ExerciseRunner() {
     const by = (n) => keypoints.find(k => k.name === n || k.part === n);
     const minScore = typeof cfg.targets?.minScore === 'number' ? cfg.targets.minScore : 0.35;
     const targetType = cfg.targets?.type;
+    if (!cfg.targets || Object.keys(cfg.targets).length === 0) {
+      return { level: 'info', message: 'No targets configured. Therapist must set angle ranges.', inRange: false };
+    }
 
     if (targetType === 'tpose') {
       const ls = by('left_shoulder'), rs = by('right_shoulder');
       const lw = by('left_wrist'), rw = by('right_wrist');
       if (!ls || !rs || !lw || !rw) return { level: 'info', message: 'Move into frame', inRange: false };
-      if ((ls.score || 0) < minScore || (rs.score || 0) < minScore || (lw.score || 0) < minScore || (rw.score || 0) < minScore) {
+      if ([ls, rs, lw, rw].some(p => (p.score || 0) < minScore)) {
         return { level: 'info', message: 'Move closer to the camera', inRange: false };
       }
 
@@ -402,30 +424,34 @@ export default function ExerciseRunner() {
       };
       const leftTilt = tiltDeg(ls, lw);
       const rightTilt = tiltDeg(rs, rw);
-      const allowedTilt = typeof cfg.targets.allowedRotation === 'number' ? cfg.targets.allowedRotation : 12;
+      const allowedTilt = typeof cfg.targets.allowedRotation === 'number' ? cfg.targets.allowedRotation : null;
+      if (allowedTilt == null) return { level: 'info', message: 'Set T-pose tilt targets in exercise.', inRange: false };
       const leftTiltOk = leftTilt <= allowedTilt;
       const rightTiltOk = rightTilt <= allowedTilt;
 
-      // Prefer explicit elbow check when available: elbow angle should be near 180° (straight arm)
+      // Prefer explicit elbow check when available: measure elbow flexion (0 deg = straight)
       const le = by('left_elbow');
       const re = by('right_elbow');
-      const elbowTol = typeof cfg.targets?.elbowTol === 'number' ? cfg.targets.elbowTol : 20; // degrees tolerance around 180
-      const minScore2 = typeof cfg.targets?.minScore === 'number' ? cfg.targets.minScore : 0.35;
+      const elbowTol = typeof cfg.targets?.elbowTol === 'number' ? cfg.targets.elbowTol : null;
+      const elbowsVisible = le && re && (le.score || 0) >= minScore && (re.score || 0) >= minScore;
+      if (elbowTol == null) return { level: 'info', message: 'Set elbow tolerance for T-pose.', inRange: false };
 
-      if (le && re && (le.score || 0) >= minScore2 && (re.score || 0) >= minScore2) {
+      if (elbowsVisible) {
         const leftElbowAngle = calcAngle(ls, le, lw);
         const rightElbowAngle = calcAngle(rs, re, rw);
-        const leftElbowOk = leftElbowAngle != null && leftElbowAngle >= (180 - elbowTol);
-        const rightElbowOk = rightElbowAngle != null && rightElbowAngle >= (180 - elbowTol);
+        const leftElbowFlexion = leftElbowAngle != null ? Math.max(0, 180 - leftElbowAngle) : null;
+        const rightElbowFlexion = rightElbowAngle != null ? Math.max(0, 180 - rightElbowAngle) : null;
+        const leftElbowOk = leftElbowFlexion != null && leftElbowFlexion <= elbowTol;
+        const rightElbowOk = rightElbowFlexion != null && rightElbowFlexion <= elbowTol;
 
         if (leftTiltOk && rightTiltOk && leftElbowOk && rightElbowOk) {
-          return { level: 'good', message: cfg.targets?.correctMsg || 'Hold your arms straight out to the sides.', inRange: true, details: { leftTilt, rightTilt, leftElbowAngle, rightElbowAngle } };
+          return { level: 'good', message: cfg.targets?.correctMsg || 'Hold your arms straight out to the sides.', inRange: true, details: { leftTilt, rightTilt, leftElbowFlexion, rightElbowFlexion } };
         }
 
         const base = cfg.targets?.incorrectMsg;
-        if (!leftElbowOk && !rightElbowOk) return { level: 'bad', message: base || `Both elbows appear bent — aim for straight arms (≈180° ±${elbowTol}°).`, inRange: false, details: { leftTilt, rightTilt, leftElbowAngle, rightElbowAngle } };
-        if (!leftElbowOk) return { level: 'caution', message: base || `Left elbow: ${leftElbowAngle != null ? Math.round(leftElbowAngle)+'°' : '—'} — straighten toward 180°.`, inRange: false, details: { leftTilt, rightTilt, leftElbowAngle } };
-        if (!rightElbowOk) return { level: 'caution', message: base || `Right elbow: ${rightElbowAngle != null ? Math.round(rightElbowAngle)+'°' : '—'} — straighten toward 180°.`, inRange: false, details: { leftTilt, rightTilt, rightElbowAngle } };
+        if (!leftElbowOk && !rightElbowOk) return { level: 'bad', message: base || `Both elbows look bent; aim for straight arms (<= ${elbowTol} deg flexion).`, inRange: false, details: { leftTilt, rightTilt, leftElbowFlexion, rightElbowFlexion } };
+        if (!leftElbowOk) return { level: 'caution', message: base || `Left elbow: ${leftElbowFlexion != null ? Math.round(leftElbowFlexion) + ' deg flex' : 'unseen'} - straighten toward 0 deg.`, inRange: false, details: { leftTilt, rightTilt, leftElbowFlexion } };
+        if (!rightElbowOk) return { level: 'caution', message: base || `Right elbow: ${rightElbowFlexion != null ? Math.round(rightElbowFlexion) + ' deg flex' : 'unseen'} - straighten toward 0 deg.`, inRange: false, details: { leftTilt, rightTilt, rightElbowFlexion } };
       }
 
       // Fallback to tilt-only guidance when elbows are not visible or confident
@@ -457,19 +483,40 @@ export default function ExerciseRunner() {
       const wrist = by(`${side}_wrist`);
       const armTilt = wrist ? Math.abs(Math.atan2(Math.abs((wrist.y - shoulder.y)), Math.abs((wrist.x - shoulder.x))) * 180 / Math.PI) : null;
 
-      const [minKnee, maxKnee] = cfg.targets.kneeRange || [80, 110];
-      const maxLean = cfg.targets.torsoMaxLean ?? 25;
-      const maxArmTilt = cfg.targets.armMaxTilt ?? 25;
+      const [minKnee, maxKnee] = cfg.targets.kneeRange || [];
+      if (!Number.isFinite(minKnee) || !Number.isFinite(maxKnee)) {
+        return { level: 'info', message: 'Set knee angle range in exercise.', inRange: false };
+      }
+      const hipRange = cfg.targets.hipRange;
+      const backMin = cfg.targets.backMin;
+      const maxLean = typeof cfg.targets.torsoMaxLean === 'number'
+        ? cfg.targets.torsoMaxLean
+        : typeof backMin === 'number'
+          ? Math.max(0, 180 - backMin)
+          : null;
+      if (maxLean == null) return { level: 'info', message: 'Set torso/back target for squat.', inRange: false };
+      const maxArmTilt = cfg.targets.armMaxTilt ?? null;
+      if (maxArmTilt == null) return { level: 'info', message: 'Set arm tilt target for squat.', inRange: false };
 
       let level = 'good';
       const cues = [];
+      const setLevel = (sev) => {
+        if (sev === 'bad') level = 'bad';
+        else if (level === 'good') level = sev;
+      };
 
-      if (torsoLeanDeg > maxLean) { level = 'caution'; cues.push('Keep your chest up and back tall.'); }
-      if (kneeAngle > maxKnee) { level = 'caution'; cues.push(`Bend your knees more (aim ${minKnee}-${maxKnee} deg).`); }
-      if (kneeAngle < minKnee - 5) { level = 'bad'; cues.push('Squat is too deep — rise a bit.'); }
-      if (armTilt != null && armTilt > maxArmTilt) { level = level === 'good' ? 'caution' : level; cues.push('Lift your arms to shoulder height.'); }
+      if (torsoLeanDeg > maxLean) { setLevel('caution'); cues.push(`Keep your chest up; limit torso lean to ${maxLean} deg.`); }
+      if (Array.isArray(hipRange)) {
+        const [minHip, maxHip] = hipRange;
+        if (hipAngle < minHip) { setLevel('caution'); cues.push(`Open your hip a bit more (aim ${minHip}-${maxHip} deg).`); }
+        if (hipAngle > maxHip) { setLevel('caution'); cues.push(`Do not drop hips past ${maxHip} deg.`); }
+      }
+      if (kneeAngle > maxKnee) { setLevel('caution'); cues.push(`Bend your knees more (aim ${minKnee}-${maxKnee} deg).`); }
+      if (kneeAngle < minKnee - 5) { setLevel('bad'); cues.push('Squat is too deep - rise a bit.'); }
+      if (armTilt != null && armTilt > maxArmTilt) { setLevel('caution'); cues.push('Lift your arms to shoulder height.'); }
 
-      const inRange = kneeAngle >= minKnee && kneeAngle <= maxKnee && torsoLeanDeg <= maxLean;
+      const inRange = kneeAngle >= minKnee && kneeAngle <= maxKnee && torsoLeanDeg <= maxLean
+        && (!hipRange || (hipAngle >= hipRange[0] && hipAngle <= hipRange[1]));
       return {
         level: cues.length ? level : 'good',
         message: cues[0] || 'Hold that squat position.',
@@ -478,23 +525,29 @@ export default function ExerciseRunner() {
       };
     }
 
-    const targets = cfg.targets || (cfg.joints === 'arm'
-      ? { targetRange: [45, 60] }
-      : { bottomRange: [70, 100], topRange: [150, 180] }
-    );
+    const targets = cfg.targets;
     if (smoothedAngle == null) return { level: 'info', message: 'Move into frame' };
     if (targets.targetRange && Array.isArray(targets.targetRange)) {
       const [minA, maxA] = targets.targetRange;
+      if (!Number.isFinite(minA) || !Number.isFinite(maxA)) {
+        return { level: 'info', message: 'Invalid target range. Please set min/max angles.', inRange: false };
+      }
       if (smoothedAngle >= minA && smoothedAngle <= maxA) {
-        return { level: 'good', message: `Great — hold ${minA}-${maxA} deg.`, inRange: true };
+        return { level: 'good', message: `Great - hold ${minA}-${maxA} deg.`, inRange: true };
       }
       if (smoothedAngle < minA) {
         return { level: 'caution', message: 'Extend your elbow slightly.', inRange: false };
       }
       return { level: 'caution', message: 'Bend your elbow a bit more.', inRange: false };
     }
-    const [minBottom, maxBottom] = targets.bottomRange || [70, 100];
-    const [minTop] = targets.topRange || [150, 180];
+    if (!targets.bottomRange || !targets.topRange) {
+      return { level: 'info', message: 'No angle ranges configured.', inRange: false };
+    }
+    const [minBottom, maxBottom] = targets.bottomRange;
+    const [minTop] = targets.topRange;
+    if (!Number.isFinite(minBottom) || !Number.isFinite(maxBottom) || !Number.isFinite(minTop)) {
+      return { level: 'info', message: 'Invalid angle ranges configured.', inRange: false };
+    }
     let level = 'good';
     let message = 'Good form';
     if (keypoints && keypoints.length) {
@@ -514,7 +567,7 @@ export default function ExerciseRunner() {
       else { level = 'bad'; message = 'Not fully extended'; }
     } else {
       if (smoothedAngle >= minBottom && smoothedAngle <= maxBottom) { level = 'good'; message = 'Depth looks good'; }
-      else if (smoothedAngle < minBottom) { level = 'bad'; message = 'Too deep — protect your joints'; }
+      else if (smoothedAngle < minBottom) { level = 'bad'; message = 'Too deep - protect your joints'; }
       else { level = 'caution'; message = 'Go a bit deeper'; }
     }
     return { level, message, inRange: level === 'good' };
@@ -535,6 +588,11 @@ export default function ExerciseRunner() {
     const kp = pose.keypoints || [];
     const scoreMin = 0.3;
     const get = (name) => kp.find(k => (k.name === name || k.part === name));
+    const angle = poseMetricsRef.current.smoothedAngle;
+    // Derive fresh feedback for drawing to avoid state lag
+    const cfg = getPoseConfig();
+    const fb = evaluateForm(angle, cfg, pose.keypoints || [], { chosenSide: poseMetricsRef.current.usedSide });
+    const levelColor = fb.level === 'good' ? '#22c55e' : fb.level === 'caution' ? '#f59e0b' : fb.level === 'bad' ? '#ef4444' : '#38bdf8';
     const edges = [
       ['left_shoulder','right_shoulder'],
       ['left_shoulder','left_elbow'],['left_elbow','left_wrist'],
@@ -543,20 +601,15 @@ export default function ExerciseRunner() {
       ['left_hip','left_knee'],['left_knee','left_ankle'],
       ['right_hip','right_knee'],['right_knee','right_ankle']
     ];
-    ctx.strokeStyle = '#4ade80';
+    ctx.strokeStyle = levelColor;
     edges.forEach(([a,b]) => {
       const pa = get(a), pb = get(b);
       if (!pa || !pb || pa.score < scoreMin || pb.score < scoreMin) return;
       ctx.beginPath(); ctx.moveTo(pa.x * sx, pa.y * sy); ctx.lineTo(pb.x * sx, pb.y * sy); ctx.stroke();
     });
-    ctx.fillStyle = '#93c5fd';
+    ctx.fillStyle = levelColor;
     ['left_hip','right_hip','left_knee','right_knee','left_ankle','right_ankle','left_shoulder','right_shoulder','left_elbow','right_elbow','left_wrist','right_wrist']
       .forEach(n => { const p = get(n); if (!p || p.score < scoreMin) return; ctx.beginPath(); ctx.arc(p.x * sx, p.y * sy, 3, 0, Math.PI*2); ctx.fill(); });
-        // banner with angle + feedback + backend
-    const angle = poseMetricsRef.current.smoothedAngle;
-    // Derive fresh feedback for drawing to avoid state lag
-    const cfg = getPoseConfig();
-    const fb = evaluateForm(angle, cfg, pose.keypoints || [], { chosenSide: poseMetricsRef.current.usedSide });
     ctx.fillStyle = fb.level === 'good' ? 'rgba(16,185,129,0.75)' : fb.level === 'caution' ? 'rgba(234,179,8,0.75)' : fb.level === 'bad' ? 'rgba(239,68,68,0.75)' : 'rgba(59,130,246,0.75)';
     ctx.fillRect(0, 0, c.width, 44);
     ctx.fillStyle = '#0b1020';
@@ -572,16 +625,35 @@ export default function ExerciseRunner() {
     ctx.fillStyle = '#0f172a';
     let infoLine = fb.message || '';
     if (fb.details?.leftTilt != null) {
-      infoLine = `T-pose: left tilt ${fb.details.leftTilt.toFixed(0)} deg, right tilt ${fb.details.rightTilt?.toFixed(0) ?? '--'} deg`;
+      if (fb.details.leftElbowFlexion != null || fb.details.rightElbowFlexion != null) {
+        infoLine = `T-pose: left tilt ${fb.details.leftTilt.toFixed(0)} deg, right tilt ${fb.details.rightTilt?.toFixed(0) ?? '--'} deg | flex L:${fb.details.leftElbowFlexion != null ? Math.round(fb.details.leftElbowFlexion)+' deg' : '--'}, R:${fb.details.rightElbowFlexion != null ? Math.round(fb.details.rightElbowFlexion)+' deg' : '--'}`;
+      } else {
+        infoLine = `T-pose: left tilt ${fb.details.leftTilt.toFixed(0)} deg, right tilt ${fb.details.rightTilt?.toFixed(0) ?? '--'} deg`;
+      }
     } else if (fb.details?.kneeAngle != null) {
-      infoLine = `Squat: knee ${fb.details.kneeAngle.toFixed(0)} deg, torso lean ${fb.details.torsoLeanDeg?.toFixed(0) ?? '--'} deg, arms tilt ${fb.details.armTilt != null ? fb.details.armTilt.toFixed(0) : '--'} deg`;
+      infoLine = `Squat: knee ${fb.details.kneeAngle.toFixed(0)} deg, hip ${fb.details.hipAngle?.toFixed(0) ?? '--'} deg, torso lean ${fb.details.torsoLeanDeg?.toFixed(0) ?? '--'} deg, arms tilt ${fb.details.armTilt != null ? fb.details.armTilt.toFixed(0) : '--'} deg`;
+    } else if (cfg.targets?.type === 'tpose') {
+      // Show configured T-pose targets (elbow flexion tolerance and allowed tilt)
+      const allowedTilt = typeof cfg.targets.allowedRotation === 'number' ? cfg.targets.allowedRotation : null;
+      const elbowTol = typeof cfg.targets.elbowTol === 'number' ? cfg.targets.elbowTol : null;
+      infoLine = `T-pose target: flex <= ${elbowTol ?? 'unset'} deg; tilt <= ${allowedTilt ?? 'unset'} deg`;
+      if (fb.details?.leftElbowFlexion != null || fb.details?.rightElbowFlexion != null) {
+        infoLine += ` | flex L:${fb.details.leftElbowFlexion != null ? Math.round(fb.details.leftElbowFlexion)+' deg' : '--'}, R:${fb.details.rightElbowFlexion != null ? Math.round(fb.details.rightElbowFlexion)+' deg' : '--'}`;
+      }
+      if (fb.details?.leftTilt != null) {
+        infoLine += ` | tilt L:${fb.details.leftTilt.toFixed(0)} deg, R:${fb.details.rightTilt?.toFixed(0) ?? '--'} deg`;
+      }
     } else if (cfg.joints === 'arm' && !cfg.targets?.type) {
-      infoLine = 'Target: 45-60 deg (elbow flexion)';
+      infoLine = 'No elbow targets configured.';
     }
     if (infoLine) ctx.fillText(infoLine, 8, 36);
   }
 
   const handleStart = async () => {
+    poseMetricsRef.current = makePoseMetrics();
+    repQualityRef.current = [];
+    setRepStats({ correct: 0, incorrect: 0 });
+    setFeedback((prev) => ({ ...prev, message: 'Starting...', level: 'info' }));
     setTimeLeft(initialTime);
     if (includeVideo) { await startMedia(); try { mediaRecorderRef.current?.start(); } catch (e) { console.warn('recorder start failed', e); } }
     setRunning(true);
@@ -589,7 +661,18 @@ export default function ExerciseRunner() {
   };
 
   const handlePause = () => { setRunning(false); try { mediaRecorderRef.current?.pause?.(); } catch (e) {} push('Paused', 'info'); };
-  const handleReset = () => { setRunning(false); setTimeLeft(initialTime); setReps(0); stopMedia(); setRecordingBlobUrl(null); push('Reset', 'info'); };
+  const handleReset = () => {
+    setRunning(false);
+    setTimeLeft(initialTime);
+    setReps(0);
+    poseMetricsRef.current = makePoseMetrics();
+    repQualityRef.current = [];
+    setRepStats({ correct: 0, incorrect: 0 });
+    stopMedia();
+    setRecordingBlobUrl(null);
+    setFeedback({ level: 'info', message: 'Reset. Ready when you are.' });
+    push('Reset', 'info');
+  };
   const handleStop = () => { setRunning(false); try { mediaRecorderRef.current?.stop(); } catch (e) {} stopMedia(); push('Stopped', 'info'); };
 
   const submitResult = async ({ completed = true, score = null } = {}) => {
@@ -609,7 +692,9 @@ export default function ExerciseRunner() {
       ...poseMetrics,
       avgAngle: avgAngle ?? undefined,
       cadence,
-      quality: repQualityRef.current
+      quality: repQualityRef.current,
+      correctReps: poseMetrics.correctReps ?? repStats.correct ?? undefined,
+      incorrectReps: poseMetrics.incorrectReps ?? repStats.incorrect ?? undefined
     },
     heartRate: heartRate ?? null
   };
@@ -636,6 +721,14 @@ export default function ExerciseRunner() {
   };
 
   if (!ex) return <main className="min-h-screen p-8 bg-gray-900 text-gray-100"><div className="max-w-2xl mx-auto">No exercise selected</div></main>;
+
+  const feedbackTone = feedback.level === 'good'
+    ? 'bg-emerald-900/70 border border-emerald-600 text-emerald-100'
+    : feedback.level === 'caution'
+      ? 'bg-amber-900/70 border border-amber-600 text-amber-100'
+      : feedback.level === 'bad'
+        ? 'bg-red-900/70 border border-red-600 text-red-100'
+        : 'bg-slate-800 border border-slate-600 text-slate-100';
 
   return (
     <main className="min-h-screen h-screen bg-gray-900 text-gray-100">
@@ -736,8 +829,12 @@ export default function ExerciseRunner() {
                 ) : fitbitStatus === 'error' ? (
                   <span className="text-red-400">Error</span>
                 ) : (
-                  <span className="text-gray-400">Checking…</span>
+                  <span className="text-gray-400">Checking...</span>
                 )}
+              </div>
+              <div className="mt-2 text-sm flex gap-4">
+                <span className="text-green-400 font-semibold">Correct: {repStats.correct}</span>
+                <span className="text-amber-300 font-semibold">Needs fix: {repStats.incorrect}</span>
               </div>
             </div>
             <div className="flex gap-2 mb-2">
@@ -752,6 +849,12 @@ export default function ExerciseRunner() {
 
             <div className="mb-2">
               <div className="text-sm">Recorded video</div>
+              {enablePose && (
+                <div className={`mt-2 rounded px-3 py-2 text-sm ${feedbackTone}`}>
+                  <span className="font-semibold mr-2">Coach:</span>
+                  <span>{feedback.message || 'Hold steady for tracking.'}</span>
+                </div>
+              )}
               <div className="mt-2 bg-black rounded p-2 shadow-lg">
                 {includeVideo ? (
                   <div className="relative">

@@ -22,7 +22,25 @@ router.get('/', verifyToken, async (req, res) => {
 router.post('/', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
-    const { title, description, category, poseConfig = {}, metadata = {} } = req.body;
+    const { title, description, category, metadata = {} } = req.body;
+    const poseConfig = (() => {
+      const cfg = req.body.poseConfig && typeof req.body.poseConfig === 'object' ? { ...req.body.poseConfig } : {};
+      for (const k of Object.keys(cfg)) {
+        if (cfg[k] === '' || cfg[k] === null || cfg[k] === undefined) delete cfg[k];
+      }
+      if (cfg.targets && typeof cfg.targets === 'object') {
+        for (const k of Object.keys(cfg.targets)) {
+          const v = cfg.targets[k];
+          if (v === '' || v === null || v === undefined) delete cfg.targets[k];
+        }
+        if (Array.isArray(cfg.targets.kneeRange)) {
+          const [a, b] = cfg.targets.kneeRange;
+          if (!Number.isFinite(a) || !Number.isFinite(b)) delete cfg.targets.kneeRange;
+        }
+        if (Object.keys(cfg.targets).length === 0) delete cfg.targets;
+      }
+      return cfg;
+    })();
     if (!title || typeof title !== 'string' || title.length < 3) return res.status(400).json({ success: false, error: 'Title is required (min 3 chars)' });
     const t = new ExerciseTemplate({ title, description, category, poseConfig, metadata, createdBy: req.user.id });
     await t.save();
@@ -60,6 +78,18 @@ router.post('/:id/instantiate', verifyToken, async (req, res) => {
         if (overrides.poseConfig[k] === '' || overrides.poseConfig[k] === null || overrides.poseConfig[k] === undefined) {
           delete overrides.poseConfig[k];
         }
+      }
+      if (overrides.poseConfig.targets && typeof overrides.poseConfig.targets === 'object') {
+        // drop empty target fields
+        for (const k of Object.keys(overrides.poseConfig.targets)) {
+          const val = overrides.poseConfig.targets[k];
+          if (val === '' || val === null || val === undefined) delete overrides.poseConfig.targets[k];
+        }
+        if (Array.isArray(overrides.poseConfig.targets.kneeRange)) {
+          const [a, b] = overrides.poseConfig.targets.kneeRange;
+          if (!Number.isFinite(a) || !Number.isFinite(b)) delete overrides.poseConfig.targets.kneeRange;
+        }
+        if (Object.keys(overrides.poseConfig.targets).length === 0) delete overrides.poseConfig.targets;
       }
       // If poseConfig ends up empty, remove it
       if (Object.keys(overrides.poseConfig).length === 0) delete overrides.poseConfig;

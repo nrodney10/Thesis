@@ -9,7 +9,19 @@ export default function Templates() {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const [newTpl, setNewTpl] = useState({ title: '', description: '', poseConfig: { joints: 'arm', upAngle: 90, downAngle: 140, smoothing: 0.2, minRepTimeMs: 400, targets: { type: '', allowedRotation: 12, elbowTol: 20, minScore: 0.35, kneeRange: [80,110], torsoMaxLean: 25, armMaxTilt: 25 } } });
+  const [newTpl, setNewTpl] = useState({
+    title: '',
+    description: '',
+    poseConfig: {
+      joints: 'arm',
+      upAngle: '',
+      downAngle: '',
+      smoothing: 0.2,
+      minRepTimeMs: 400,
+      targets: {}
+    },
+    metadata: { reps: '', holdSeconds: '' }
+  });
   const [assign, setAssign] = useState({ templateId: '', assignedTo: new Set(), overrides: { title: '', poseConfig: {} } });
 
   const load = useCallback(async () => {
@@ -31,9 +43,34 @@ export default function Templates() {
 
   useEffect(() => { load(); }, [load]);
 
+  const sanitizePoseConfig = (cfg = {}) => {
+    const copy = JSON.parse(JSON.stringify(cfg));
+    if (copy.upAngle === '' || copy.upAngle === null) delete copy.upAngle;
+    if (copy.downAngle === '' || copy.downAngle === null) delete copy.downAngle;
+    if (copy.targets) {
+      if (Array.isArray(copy.targets.kneeRange)) {
+        const [a, b] = copy.targets.kneeRange;
+        if (!Number.isFinite(a) || !Number.isFinite(b)) delete copy.targets.kneeRange;
+      }
+      for (const key of Object.keys(copy.targets)) {
+        const val = copy.targets[key];
+        if (val === '' || val === null) delete copy.targets[key];
+      }
+      if (Object.keys(copy.targets).length === 0) delete copy.targets;
+    }
+    return copy;
+  };
+
   const createTemplate = async () => {
     try {
-      const res = await authFetch('http://localhost:5000/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newTpl) });
+      const body = {
+        ...newTpl,
+        poseConfig: sanitizePoseConfig(newTpl.poseConfig),
+        metadata: { ...newTpl.metadata }
+      };
+      if (!body.metadata.reps) delete body.metadata.reps;
+      if (!body.metadata.holdSeconds) delete body.metadata.holdSeconds;
+      const res = await authFetch('http://localhost:5000/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json();
       if (data.success) { push('Template created', 'success'); setNewTpl({ ...newTpl, title: '', description: '' }); load(); }
       else push('Failed to create template', 'error');
@@ -43,7 +80,9 @@ export default function Templates() {
   const instantiate = async () => {
     if (!assign.templateId) return push('Pick a template', 'error');
     try {
-      const body = { assignedTo: Array.from(assign.assignedTo), overrides: { ...assign.overrides } };
+      const cleanedOverrides = { ...assign.overrides };
+      if (cleanedOverrides.poseConfig) cleanedOverrides.poseConfig = sanitizePoseConfig(cleanedOverrides.poseConfig);
+      const body = { assignedTo: Array.from(assign.assignedTo), overrides: cleanedOverrides };
       const res = await authFetch(`http://localhost:5000/api/templates/${assign.templateId}/instantiate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json();
       if (data.success) push('Exercise created from template', 'success');
@@ -92,8 +131,8 @@ export default function Templates() {
           <label className="block text-sm mb-2">Description<textarea value={newTpl.description} onChange={e=>setNewTpl({...newTpl, description:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1"/></label>
           <div className="grid grid-cols-2 gap-2 mb-2">
             <label className="text-sm">Joints<select value={newTpl.poseConfig.joints} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, joints:e.target.value}})} className="w-full p-2 bg-gray-700 rounded mt-1"><option value="arm">Arm</option><option value="knee">Knee</option><option value="shoulder">Shoulder</option></select></label>
-            <label className="text-sm">Up angle<input type="number" value={newTpl.poseConfig.upAngle} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, upAngle:Number(e.target.value)}})} className="w-full p-2 bg-gray-700 rounded mt-1"/></label>
-            <label className="text-sm">Down angle<input type="number" value={newTpl.poseConfig.downAngle} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, downAngle:Number(e.target.value)}})} className="w-full p-2 bg-gray-700 rounded mt-1"/></label>
+            <label className="text-sm">Up angle<input type="number" value={newTpl.poseConfig.upAngle ?? ''} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, upAngle:e.target.value === '' ? '' : Number(e.target.value)}})} className="w-full p-2 bg-gray-700 rounded mt-1"/></label>
+            <label className="text-sm">Down angle<input type="number" value={newTpl.poseConfig.downAngle ?? ''} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, downAngle:e.target.value === '' ? '' : Number(e.target.value)}})} className="w-full p-2 bg-gray-700 rounded mt-1"/></label>
             <label className="text-sm">Smoothing<input type="number" step="0.05" min="0" max="1" value={newTpl.poseConfig.smoothing} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, smoothing:Number(e.target.value)}})} className="w-full p-2 bg-gray-700 rounded mt-1"/></label>
           </div>
 
@@ -109,13 +148,13 @@ export default function Templates() {
             {newTpl.poseConfig.targets?.type === 'tpose' && (
               <div className="grid grid-cols-2 gap-2 mt-2">
                 <label className="text-sm">Allowed tilt (deg)
-                  <input type="number" value={newTpl.poseConfig.targets.allowedRotation} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, allowedRotation: Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                  <input type="number" value={newTpl.poseConfig.targets.allowedRotation ?? ''} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, allowedRotation: e.target.value === '' ? '' : Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                 </label>
                 <label className="text-sm">Elbow tolerance (deg)
-                  <input type="number" value={newTpl.poseConfig.targets.elbowTol} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, elbowTol: Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                  <input type="number" value={newTpl.poseConfig.targets.elbowTol ?? ''} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, elbowTol: e.target.value === '' ? '' : Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                 </label>
                 <label className="text-sm">Min keypoint score
-                  <input type="number" step="0.05" min="0" max="1" value={newTpl.poseConfig.targets.minScore} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, minScore: Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                  <input type="number" step="0.05" min="0" max="1" value={newTpl.poseConfig.targets.minScore ?? ''} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, minScore: e.target.value === '' ? '' : Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                 </label>
                 <label className="text-sm">Correct message
                   <input value={newTpl.poseConfig.targets.correctMsg || ''} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, correctMsg: e.target.value}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
@@ -129,19 +168,27 @@ export default function Templates() {
             {newTpl.poseConfig.targets?.type === 'squat' && (
               <div className="grid grid-cols-2 gap-2 mt-2">
                 <label className="text-sm">Knee range (min)
-                  <input type="number" value={(newTpl.poseConfig.targets.kneeRange && newTpl.poseConfig.targets.kneeRange[0]) || 80} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, kneeRange: [Number(e.target.value), newTpl.poseConfig.targets.kneeRange ? newTpl.poseConfig.targets.kneeRange[1] : 110]}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                  <input type="number" value={(newTpl.poseConfig.targets.kneeRange && newTpl.poseConfig.targets.kneeRange[0]) ?? ''} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, kneeRange: [e.target.value === '' ? '' : Number(e.target.value), newTpl.poseConfig.targets?.kneeRange ? newTpl.poseConfig.targets.kneeRange[1] : '']}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                 </label>
                 <label className="text-sm">Knee range (max)
-                  <input type="number" value={(newTpl.poseConfig.targets.kneeRange && newTpl.poseConfig.targets.kneeRange[1]) || 110} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, kneeRange: [newTpl.poseConfig.targets.kneeRange ? newTpl.poseConfig.targets.kneeRange[0] : 80, Number(e.target.value)]}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                  <input type="number" value={(newTpl.poseConfig.targets.kneeRange && newTpl.poseConfig.targets.kneeRange[1]) ?? ''} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, kneeRange: [newTpl.poseConfig.targets?.kneeRange ? newTpl.poseConfig.targets.kneeRange[0] : '', e.target.value === '' ? '' : Number(e.target.value)]}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                 </label>
                 <label className="text-sm">Max torso lean (deg)
-                  <input type="number" value={newTpl.poseConfig.targets.torsoMaxLean} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, torsoMaxLean: Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                  <input type="number" value={newTpl.poseConfig.targets.torsoMaxLean ?? ''} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, torsoMaxLean: e.target.value === '' ? '' : Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                 </label>
                 <label className="text-sm">Max arm tilt (deg)
-                  <input type="number" value={newTpl.poseConfig.targets.armMaxTilt} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, armMaxTilt: Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                  <input type="number" value={newTpl.poseConfig.targets.armMaxTilt ?? ''} onChange={e=>setNewTpl({...newTpl, poseConfig:{...newTpl.poseConfig, targets:{...newTpl.poseConfig.targets, armMaxTilt: e.target.value === '' ? '' : Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                 </label>
               </div>
             )}
+          </div>
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <label className="text-sm">Default reps
+              <input type="number" value={newTpl.metadata?.reps ?? ''} onChange={e=>setNewTpl({...newTpl, metadata:{...newTpl.metadata, reps: e.target.value === '' ? '' : Number(e.target.value)}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+            </label>
+            <label className="text-sm">Hold seconds (optional)
+              <input type="number" value={newTpl.metadata?.holdSeconds ?? ''} onChange={e=>setNewTpl({...newTpl, metadata:{...newTpl.metadata, holdSeconds: e.target.value === '' ? '' : Number(e.target.value)}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+            </label>
           </div>
           <button onClick={createTemplate} className="bg-indigo-600 px-3 py-2 rounded">Save Template</button>
         </section>
@@ -176,9 +223,9 @@ export default function Templates() {
             </label>
           </div>
           <div className="grid grid-cols-3 gap-2 mt-2">
-            <label className="text-sm">Up angle<input type="number" value={assign.overrides.poseConfig?.upAngle || ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, upAngle:Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1"/></label>
-            <label className="text-sm">Down angle<input type="number" value={assign.overrides.poseConfig?.downAngle || ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, downAngle:Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1"/></label>
-            <label className="text-sm">Smoothing<input type="number" step="0.05" min="0" max="1" value={assign.overrides.poseConfig?.smoothing || ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, smoothing:Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1"/></label>
+            <label className="text-sm">Up angle<input type="number" value={assign.overrides.poseConfig?.upAngle || ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, upAngle:e.target.value === '' ? '' : Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1"/></label>
+            <label className="text-sm">Down angle<input type="number" value={assign.overrides.poseConfig?.downAngle || ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, downAngle:e.target.value === '' ? '' : Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1"/></label>
+            <label className="text-sm">Smoothing<input type="number" step="0.05" min="0" max="1" value={assign.overrides.poseConfig?.smoothing || ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, smoothing:e.target.value === '' ? '' : Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1"/></label>
           </div>
 
           <div className="mt-2">
@@ -193,13 +240,13 @@ export default function Templates() {
             {assign.overrides.poseConfig?.targets?.type === 'tpose' && (
               <div className="grid grid-cols-2 gap-2 mt-2">
                 <label className="text-sm">Allowed tilt (deg)
-                  <input type="number" value={assign.overrides.poseConfig?.targets?.allowedRotation ?? ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, allowedRotation: Number(e.target.value)}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                  <input type="number" value={assign.overrides.poseConfig?.targets?.allowedRotation ?? ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, allowedRotation: e.target.value === '' ? '' : Number(e.target.value)}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                 </label>
                 <label className="text-sm">Elbow tolerance (deg)
-                  <input type="number" value={assign.overrides.poseConfig?.targets?.elbowTol ?? ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, elbowTol: Number(e.target.value)}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                  <input type="number" value={assign.overrides.poseConfig?.targets?.elbowTol ?? ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, elbowTol: e.target.value === '' ? '' : Number(e.target.value)}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                 </label>
                 <label className="text-sm">Min keypoint score
-                  <input type="number" step="0.05" min="0" max="1" value={assign.overrides.poseConfig?.targets?.minScore ?? ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, minScore: Number(e.target.value)}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                  <input type="number" step="0.05" min="0" max="1" value={assign.overrides.poseConfig?.targets?.minScore ?? ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, minScore: e.target.value === '' ? '' : Number(e.target.value)}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                 </label>
                 <label className="text-sm">Correct message
                   <input value={assign.overrides.poseConfig?.targets?.correctMsg || ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, correctMsg: e.target.value}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
@@ -213,16 +260,16 @@ export default function Templates() {
             {assign.overrides.poseConfig?.targets?.type === 'squat' && (
               <div className="grid grid-cols-2 gap-2 mt-2">
                 <label className="text-sm">Knee min
-                  <input type="number" value={assign.overrides.poseConfig?.targets?.kneeRange?.[0] ?? ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, kneeRange: [Number(e.target.value), assign.overrides.poseConfig?.targets?.kneeRange?.[1] ?? 110]}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                  <input type="number" value={assign.overrides.poseConfig?.targets?.kneeRange?.[0] ?? ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, kneeRange: [e.target.value === '' ? '' : Number(e.target.value), assign.overrides.poseConfig?.targets?.kneeRange?.[1] ?? '']}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                 </label>
                 <label className="text-sm">Knee max
-                  <input type="number" value={assign.overrides.poseConfig?.targets?.kneeRange?.[1] ?? ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, kneeRange: [assign.overrides.poseConfig?.targets?.kneeRange?.[0] ?? 80, Number(e.target.value)]}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                  <input type="number" value={assign.overrides.poseConfig?.targets?.kneeRange?.[1] ?? ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, kneeRange: [assign.overrides.poseConfig?.targets?.kneeRange?.[0] ?? '', e.target.value === '' ? '' : Number(e.target.value)]}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                 </label>
                 <label className="text-sm">Max torso lean (deg)
-                  <input type="number" value={assign.overrides.poseConfig?.targets?.torsoMaxLean ?? ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, torsoMaxLean: Number(e.target.value)}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                  <input type="number" value={assign.overrides.poseConfig?.targets?.torsoMaxLean ?? ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, torsoMaxLean: e.target.value === '' ? '' : Number(e.target.value)}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                 </label>
                 <label className="text-sm">Max arm tilt (deg)
-                  <input type="number" value={assign.overrides.poseConfig?.targets?.armMaxTilt ?? ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, armMaxTilt: Number(e.target.value)}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                  <input type="number" value={assign.overrides.poseConfig?.targets?.armMaxTilt ?? ''} onChange={e=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets:{...assign.overrides.poseConfig?.targets, armMaxTilt: e.target.value === '' ? '' : Number(e.target.value)}}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                 </label>
               </div>
             )}

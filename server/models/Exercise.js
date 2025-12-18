@@ -2,10 +2,12 @@ import mongoose from 'mongoose';
 
 const poseConfigSchema = new mongoose.Schema({
   joints: { type: String, enum: ['knee', 'arm', 'shoulder'], default: 'knee' },
-  upAngle: { type: Number, default: 90 },
-  downAngle: { type: Number, default: 140 },
+  upAngle: { type: Number },
+  downAngle: { type: Number },
   smoothing: { type: Number, default: 0.2 },
-  minRepTimeMs: { type: Number, default: 400 }
+  minRepTimeMs: { type: Number, default: 400 },
+  // Therapist-defined target windows (e.g., { type:'squat', kneeRange:[70,100], torsoMaxLean:25 })
+  targets: { type: Object }
 }, { _id: false });
 
 const ExerciseSchema = new mongoose.Schema({

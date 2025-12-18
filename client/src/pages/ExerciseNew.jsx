@@ -13,10 +13,11 @@ export default function ExerciseNew() {
   const [selected, setSelected] = useState(new Set());
   const [poseConfig, setPoseConfig] = useState({
     joints: 'knee',
-    upAngle: 90,
-    downAngle: 140,
+    upAngle: '',
+    downAngle: '',
     smoothing: 0.2,
-    minRepTimeMs: 400
+    minRepTimeMs: 400,
+    targets: {}
   });
 
   useEffect(() => {
@@ -36,10 +37,17 @@ export default function ExerciseNew() {
   const submit = async () => {
     try {
       const assignedTo = Array.from(selected);
+      const cleanedPoseConfig = (() => {
+        const cfg = { ...poseConfig };
+        if (cfg.upAngle === '' || cfg.upAngle === null) delete cfg.upAngle;
+        if (cfg.downAngle === '' || cfg.downAngle === null) delete cfg.downAngle;
+        if (cfg.targets && Object.keys(cfg.targets).length === 0) delete cfg.targets;
+        return cfg;
+      })();
       const res = await authFetch('http://localhost:5000/api/exercises', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, description, assignedTo, poseConfig }),
+        body: JSON.stringify({ title, description, assignedTo, poseConfig: cleanedPoseConfig }),
       });
       const data = await res.json();
       if (data.success) {
@@ -86,11 +94,11 @@ export default function ExerciseNew() {
             </label>
             <label className="block text-sm">
               Up angle (degrees)
-              <input type="number" value={poseConfig.upAngle} onChange={(e)=>setPoseConfig({...poseConfig, upAngle: Number(e.target.value)})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+              <input type="number" value={poseConfig.upAngle} onChange={(e)=>setPoseConfig({...poseConfig, upAngle: e.target.value === '' ? '' : Number(e.target.value)})} className="w-full p-2 bg-gray-700 rounded mt-1" />
             </label>
             <label className="block text-sm">
               Down angle (degrees)
-              <input type="number" value={poseConfig.downAngle} onChange={(e)=>setPoseConfig({...poseConfig, downAngle: Number(e.target.value)})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+              <input type="number" value={poseConfig.downAngle} onChange={(e)=>setPoseConfig({...poseConfig, downAngle: e.target.value === '' ? '' : Number(e.target.value)})} className="w-full p-2 bg-gray-700 rounded mt-1" />
             </label>
             <label className="block text-sm">
               Smoothing (0-1)
