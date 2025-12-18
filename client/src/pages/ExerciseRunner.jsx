@@ -45,7 +45,6 @@ export default function ExerciseRunner() {
     praised: false,
     correctReps: 0,
     incorrectReps: 0,
-    bottomEnteredAt: null,
   });
   const poseMetricsRef = useRef(makePoseMetrics());
   const repQualityRef = useRef([]);
@@ -239,7 +238,6 @@ export default function ExerciseRunner() {
     detectorRef.current = null;
     poseLoopRef.current = null;
     poseMetricsRef.current = makePoseMetrics();
-    setRepStats({ correct: 0, incorrect: 0 });
   }
 
   async function poseFrame() {
@@ -261,8 +259,8 @@ export default function ExerciseRunner() {
     if (baseCfg.targets?.type === 'squat') guessedJoints = 'knee';
     return {
       joints: guessedJoints,
-      upAngle: baseCfg.upAngle,
-      downAngle: baseCfg.downAngle,
+      upAngle: baseCfg.upAngle ?? 90,
+      downAngle: baseCfg.downAngle ?? 140,
       smoothing: baseCfg.smoothing ?? 0.2,
       minRepTimeMs: baseCfg.minRepTimeMs ?? 400,
       targets: baseCfg.targets
@@ -272,7 +270,7 @@ export default function ExerciseRunner() {
   function processPose(pose) {
     const cfg = getPoseConfig();
     const targetType = cfg.targets?.type;
-    const isStaticHold = targetType === 'tpose';
+    const isStaticHold = targetType === 'tpose' || targetType === 'squat';
     
     // Select keypoints based on joint config; choose the better-visible side
     const key = pose.keypoints || [];
@@ -323,41 +321,30 @@ export default function ExerciseRunner() {
 
     // State machine with debouncing (skip for static holds like T-pose or squat hold)
     if (!isStaticHold) {
-      // derive thresholds from therapist inputs (prefer explicit up/down; else use knee range for squats)
-      let upThreshold = cfg.upAngle;
-      let downThreshold = cfg.downAngle;
-      if ((!Number.isFinite(upThreshold) || !Number.isFinite(downThreshold)) && cfg.targets?.type === 'squat' && Array.isArray(cfg.targets.kneeRange)) {
-        const [minKnee, maxKnee] = cfg.targets.kneeRange;
-        if (Number.isFinite(minKnee) && Number.isFinite(maxKnee)) {
-          upThreshold = minKnee;
-          downThreshold = maxKnee;
-        }
-      }
+      const upThreshold = cfg.upAngle ?? 90;
+      const downThreshold = cfg.downAngle ?? 140;
       const minRepTime = cfg.minRepTimeMs ?? 400;
       const now = Date.now();
-      const thresholdsReady = Number.isFinite(upThreshold) && Number.isFinite(downThreshold);
 
-      // Detect entering bottom position
-      if (thresholdsReady && metrics.state === 'down' && smoothed < upThreshold) {
+      if (metrics.state === 'down' && smoothed < upThreshold) {
         metrics.state = 'up';
-        metrics.bottomEnteredAt = now;
+        // encourage user to lift further if near threshold
         if (smoothed < upThreshold - 10) speak(cfg.joints === 'arm' ? 'Raise your arm higher.' : 'Go lower.');
-      } else if (thresholdsReady && metrics.state === 'up' && smoothed > downThreshold) {
-        const heldLongEnough = metrics.bottomEnteredAt ? (now - metrics.bottomEnteredAt) >= 2000 : false;
+      } else if (metrics.state === 'up' && smoothed > downThreshold) {
         // Check debounce before counting rep
         if ((now - metrics.lastRepTime) > minRepTime) {
+          // record quality for this rep
           const fb = evaluateForm(smoothed, cfg, key, { chosenSide, rawAngle: angle });
-          const score = (heldLongEnough && (fb.inRange === true || fb.level === 'good')) ? 1 : 0.2;
+          const score = fb.level === 'good' ? 1 : fb.level === 'caution' ? 0.6 : 0.2;
           repQualityRef.current.push(score);
           metrics.reps += 1;
           if (score >= 0.8) metrics.correctReps += 1; else metrics.incorrectReps += 1;
           metrics.lastRepTime = now;
           setReps(metrics.reps);
           setRepStats({ correct: metrics.correctReps, incorrect: metrics.incorrectReps });
-          speak(score >= 0.8 ? 'Great hold!' : 'Hold longer at the bottom.', { minGapMs: 1200 });
+          speak('Good job!', { minGapMs: 1200 });
         }
         metrics.state = 'down';
-        metrics.bottomEnteredAt = null;
       }
     } else {
       metrics.state = 'hold';
@@ -405,9 +392,6 @@ export default function ExerciseRunner() {
     const by = (n) => keypoints.find(k => k.name === n || k.part === n);
     const minScore = typeof cfg.targets?.minScore === 'number' ? cfg.targets.minScore : 0.35;
     const targetType = cfg.targets?.type;
-    if (!cfg.targets || Object.keys(cfg.targets).length === 0) {
-      return { level: 'info', message: 'No targets configured. Therapist must set angle ranges.', inRange: false };
-    }
 
     if (targetType === 'tpose') {
       const ls = by('left_shoulder'), rs = by('right_shoulder');
@@ -424,17 +408,15 @@ export default function ExerciseRunner() {
       };
       const leftTilt = tiltDeg(ls, lw);
       const rightTilt = tiltDeg(rs, rw);
-      const allowedTilt = typeof cfg.targets.allowedRotation === 'number' ? cfg.targets.allowedRotation : null;
-      if (allowedTilt == null) return { level: 'info', message: 'Set T-pose tilt targets in exercise.', inRange: false };
+      const allowedTilt = typeof cfg.targets.allowedRotation === 'number' ? cfg.targets.allowedRotation : 12;
       const leftTiltOk = leftTilt <= allowedTilt;
       const rightTiltOk = rightTilt <= allowedTilt;
 
       // Prefer explicit elbow check when available: measure elbow flexion (0 deg = straight)
       const le = by('left_elbow');
       const re = by('right_elbow');
-      const elbowTol = typeof cfg.targets?.elbowTol === 'number' ? cfg.targets.elbowTol : null;
+      const elbowTol = typeof cfg.targets?.elbowTol === 'number' ? cfg.targets.elbowTol : 12;
       const elbowsVisible = le && re && (le.score || 0) >= minScore && (re.score || 0) >= minScore;
-      if (elbowTol == null) return { level: 'info', message: 'Set elbow tolerance for T-pose.', inRange: false };
 
       if (elbowsVisible) {
         const leftElbowAngle = calcAngle(ls, le, lw);
@@ -483,20 +465,15 @@ export default function ExerciseRunner() {
       const wrist = by(`${side}_wrist`);
       const armTilt = wrist ? Math.abs(Math.atan2(Math.abs((wrist.y - shoulder.y)), Math.abs((wrist.x - shoulder.x))) * 180 / Math.PI) : null;
 
-      const [minKnee, maxKnee] = cfg.targets.kneeRange || [];
-      if (!Number.isFinite(minKnee) || !Number.isFinite(maxKnee)) {
-        return { level: 'info', message: 'Set knee angle range in exercise.', inRange: false };
-      }
+      const [minKnee, maxKnee] = cfg.targets.kneeRange || [80, 110];
       const hipRange = cfg.targets.hipRange;
       const backMin = cfg.targets.backMin;
       const maxLean = typeof cfg.targets.torsoMaxLean === 'number'
         ? cfg.targets.torsoMaxLean
         : typeof backMin === 'number'
           ? Math.max(0, 180 - backMin)
-          : null;
-      if (maxLean == null) return { level: 'info', message: 'Set torso/back target for squat.', inRange: false };
-      const maxArmTilt = cfg.targets.armMaxTilt ?? null;
-      if (maxArmTilt == null) return { level: 'info', message: 'Set arm tilt target for squat.', inRange: false };
+          : 25;
+      const maxArmTilt = cfg.targets.armMaxTilt ?? 25;
 
       let level = 'good';
       const cues = [];
@@ -525,13 +502,13 @@ export default function ExerciseRunner() {
       };
     }
 
-    const targets = cfg.targets;
+    const targets = cfg.targets || (cfg.joints === 'arm'
+      ? { targetRange: [45, 60] }
+      : { bottomRange: [70, 100], topRange: [150, 180] }
+    );
     if (smoothedAngle == null) return { level: 'info', message: 'Move into frame' };
     if (targets.targetRange && Array.isArray(targets.targetRange)) {
       const [minA, maxA] = targets.targetRange;
-      if (!Number.isFinite(minA) || !Number.isFinite(maxA)) {
-        return { level: 'info', message: 'Invalid target range. Please set min/max angles.', inRange: false };
-      }
       if (smoothedAngle >= minA && smoothedAngle <= maxA) {
         return { level: 'good', message: `Great - hold ${minA}-${maxA} deg.`, inRange: true };
       }
@@ -540,14 +517,8 @@ export default function ExerciseRunner() {
       }
       return { level: 'caution', message: 'Bend your elbow a bit more.', inRange: false };
     }
-    if (!targets.bottomRange || !targets.topRange) {
-      return { level: 'info', message: 'No angle ranges configured.', inRange: false };
-    }
-    const [minBottom, maxBottom] = targets.bottomRange;
-    const [minTop] = targets.topRange;
-    if (!Number.isFinite(minBottom) || !Number.isFinite(maxBottom) || !Number.isFinite(minTop)) {
-      return { level: 'info', message: 'Invalid angle ranges configured.', inRange: false };
-    }
+    const [minBottom, maxBottom] = targets.bottomRange || [70, 100];
+    const [minTop] = targets.topRange || [150, 180];
     let level = 'good';
     let message = 'Good form';
     if (keypoints && keypoints.length) {
@@ -631,12 +602,12 @@ export default function ExerciseRunner() {
         infoLine = `T-pose: left tilt ${fb.details.leftTilt.toFixed(0)} deg, right tilt ${fb.details.rightTilt?.toFixed(0) ?? '--'} deg`;
       }
     } else if (fb.details?.kneeAngle != null) {
-      infoLine = `Squat: knee ${fb.details.kneeAngle.toFixed(0)} deg, hip ${fb.details.hipAngle?.toFixed(0) ?? '--'} deg, torso lean ${fb.details.torsoLeanDeg?.toFixed(0) ?? '--'} deg, arms tilt ${fb.details.armTilt != null ? fb.details.armTilt.toFixed(0) : '--'} deg`;
+      infoLine = `Squat: knee ${fb.details.kneeAngle.toFixed(0)} deg, torso lean ${fb.details.torsoLeanDeg?.toFixed(0) ?? '--'} deg, arms tilt ${fb.details.armTilt != null ? fb.details.armTilt.toFixed(0) : '--'} deg`;
     } else if (cfg.targets?.type === 'tpose') {
       // Show configured T-pose targets (elbow flexion tolerance and allowed tilt)
-      const allowedTilt = typeof cfg.targets.allowedRotation === 'number' ? cfg.targets.allowedRotation : null;
-      const elbowTol = typeof cfg.targets.elbowTol === 'number' ? cfg.targets.elbowTol : null;
-      infoLine = `T-pose target: flex <= ${elbowTol ?? 'unset'} deg; tilt <= ${allowedTilt ?? 'unset'} deg`;
+      const allowedTilt = typeof cfg.targets.allowedRotation === 'number' ? cfg.targets.allowedRotation : 12;
+      const elbowTol = typeof cfg.targets.elbowTol === 'number' ? cfg.targets.elbowTol : 12;
+      infoLine = `T-pose target: flex <= ${elbowTol} deg; tilt <= ${allowedTilt} deg`;
       if (fb.details?.leftElbowFlexion != null || fb.details?.rightElbowFlexion != null) {
         infoLine += ` | flex L:${fb.details.leftElbowFlexion != null ? Math.round(fb.details.leftElbowFlexion)+' deg' : '--'}, R:${fb.details.rightElbowFlexion != null ? Math.round(fb.details.rightElbowFlexion)+' deg' : '--'}`;
       }
@@ -644,7 +615,7 @@ export default function ExerciseRunner() {
         infoLine += ` | tilt L:${fb.details.leftTilt.toFixed(0)} deg, R:${fb.details.rightTilt?.toFixed(0) ?? '--'} deg`;
       }
     } else if (cfg.joints === 'arm' && !cfg.targets?.type) {
-      infoLine = 'No elbow targets configured.';
+      infoLine = 'Target: 45-60 deg (elbow flexion)';
     }
     if (infoLine) ctx.fillText(infoLine, 8, 36);
   }
@@ -721,14 +692,6 @@ export default function ExerciseRunner() {
   };
 
   if (!ex) return <main className="min-h-screen p-8 bg-gray-900 text-gray-100"><div className="max-w-2xl mx-auto">No exercise selected</div></main>;
-
-  const feedbackTone = feedback.level === 'good'
-    ? 'bg-emerald-900/70 border border-emerald-600 text-emerald-100'
-    : feedback.level === 'caution'
-      ? 'bg-amber-900/70 border border-amber-600 text-amber-100'
-      : feedback.level === 'bad'
-        ? 'bg-red-900/70 border border-red-600 text-red-100'
-        : 'bg-slate-800 border border-slate-600 text-slate-100';
 
   return (
     <main className="min-h-screen h-screen bg-gray-900 text-gray-100">
@@ -832,10 +795,6 @@ export default function ExerciseRunner() {
                   <span className="text-gray-400">Checking...</span>
                 )}
               </div>
-              <div className="mt-2 text-sm flex gap-4">
-                <span className="text-green-400 font-semibold">Correct: {repStats.correct}</span>
-                <span className="text-amber-300 font-semibold">Needs fix: {repStats.incorrect}</span>
-              </div>
             </div>
             <div className="flex gap-2 mb-2">
               {!running ? (
@@ -849,12 +808,6 @@ export default function ExerciseRunner() {
 
             <div className="mb-2">
               <div className="text-sm">Recorded video</div>
-              {enablePose && (
-                <div className={`mt-2 rounded px-3 py-2 text-sm ${feedbackTone}`}>
-                  <span className="font-semibold mr-2">Coach:</span>
-                  <span>{feedback.message || 'Hold steady for tracking.'}</span>
-                </div>
-              )}
               <div className="mt-2 bg-black rounded p-2 shadow-lg">
                 {includeVideo ? (
                   <div className="relative">
