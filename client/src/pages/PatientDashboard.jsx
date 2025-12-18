@@ -78,6 +78,7 @@ export default function PatientDashboard() {
               <Link to="/patient" className="block px-3 py-2 rounded bg-gradient-to-r from-green-600 to-teal-500">Dashboard</Link>
               <Link to="/games" className="block px-3 py-2 rounded hover:bg-gray-700">Games</Link>
               <Link to="/exercises" className="block px-3 py-2 rounded hover:bg-gray-700">Exercises</Link>
+              <Link to="/calendar" className="block px-3 py-2 rounded hover:bg-gray-700">Calendar</Link>
               <Link to="/reports" className="block px-3 py-2 rounded hover:bg-gray-700">Reports</Link>
               <Link to="/notifications" className="flex items-center px-3 py-2 rounded hover:bg-gray-700">
                 <span>Notifications</span>

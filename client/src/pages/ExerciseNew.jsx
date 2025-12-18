@@ -19,6 +19,8 @@ export default function ExerciseNew() {
     minRepTimeMs: 400,
     targets: {}
   });
+  const [dueAt, setDueAt] = useState('');
+  const [dailyReminder, setDailyReminder] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -47,7 +49,7 @@ export default function ExerciseNew() {
       const res = await authFetch('http://localhost:5000/api/exercises', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, description, assignedTo, poseConfig: cleanedPoseConfig }),
+        body: JSON.stringify({ title, description, assignedTo, poseConfig: cleanedPoseConfig, dueAt: dueAt ? new Date(dueAt) : undefined, dailyReminder }),
       });
       const data = await res.json();
       if (data.success) {
@@ -110,6 +112,18 @@ export default function ExerciseNew() {
             </label>
           </div>
         </fieldset>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+          <label className="block text-sm">
+            Due date/time
+            <input type="datetime-local" value={dueAt} onChange={(e)=>setDueAt(e.target.value)} className="w-full p-2 bg-gray-700 rounded mt-1" />
+          </label>
+          <label className="block text-sm mt-1 md:mt-0">
+            <span className="flex items-center gap-2">
+              <input type="checkbox" checked={dailyReminder} onChange={(e)=>setDailyReminder(e.target.checked)} />
+              Daily reminder until completed
+            </span>
+          </label>
+        </div>
         <div className="flex gap-2">
           <button onClick={submit} className="bg-indigo-600 px-4 py-2 rounded">Create</button>
         </div>

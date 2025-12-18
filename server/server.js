@@ -13,6 +13,7 @@ import notificationsRoutes from "./routes/notifications.js";
 import reportsExportRoutes from "./routes/reports.js";
 import userRoutes from "./routes/user.js";
 import indicatorsRoutes from "./routes/indicators.js";
+import calendarRoutes from "./routes/calendar.js";
 import Exercise from './models/Exercise.js';
 import { createNotification } from './utils/createNotification.js';
 
@@ -49,12 +50,25 @@ app.use("/api/notifications", notificationsRoutes);
 app.use("/api/reports", reportsExportRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/indicators", indicatorsRoutes);
+app.use("/api/calendar", calendarRoutes);
 
 // Simple interval to send due / daily reminders every minute
 setInterval(async () => {
   try {
     const now = new Date();
+    const nextDay = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    // Upcoming (24h) reminders
+    const upcoming = await Exercise.find({ dueAt: { $gt: now, $lte: nextDay }, upcomingNotifiedAt: { $exists: false } }).limit(100);
+    for (const ex of upcoming) {
+      for (const uid of ex.assignedTo) {
+        await createNotification(uid, 'Upcoming activity', `You have '${ex.title}' scheduled soon.`, { exerciseId: ex._id, event: 'upcoming', dueAt: ex.dueAt });
+      }
+      ex.upcomingNotifiedAt = new Date();
+      await ex.save();
+    }
+
     // Due notifications
     const dueExercises = await Exercise.find({ dueAt: { $lte: now }, dueNotifiedAt: { $exists: false } }).limit(50);
     for (const ex of dueExercises) {

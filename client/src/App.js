@@ -20,6 +20,8 @@ import ExerciseRunner from "./pages/ExerciseRunner";
 import Templates from "./pages/Templates";
 import TherapistReports from "./pages/TherapistReports";
 import TherapistNotifications from "./pages/TherapistNotifications";
+import PatientCalendar from "./pages/PatientCalendar";
+import TherapistCalendar from "./pages/TherapistCalendar";
 
 function App() {
   return (
@@ -46,11 +48,13 @@ function App() {
           <Route path="/templates" element={<ProtectedRoute requiredRole="therapist"><Templates /></ProtectedRoute>} />
           <Route path="/exercises/run" element={<ProtectedRoute requiredRole="patient"><ExerciseRunner /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+          <Route path="/calendar" element={<ProtectedRoute><PatientCalendar /></ProtectedRoute>} />
           <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
           <Route path="/messages" element={<ProtectedRoute><Messages /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="/therapist/reports" element={<ProtectedRoute requiredRole="therapist"><TherapistReports /></ProtectedRoute>} />
           <Route path="/therapist/notifications" element={<ProtectedRoute requiredRole="therapist"><TherapistNotifications /></ProtectedRoute>} />
+          <Route path="/therapist/calendar" element={<ProtectedRoute requiredRole="therapist"><TherapistCalendar /></ProtectedRoute>} />
           <Route
             path="/therapist"
             element={

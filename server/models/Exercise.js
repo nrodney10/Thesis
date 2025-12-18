@@ -22,6 +22,7 @@ const ExerciseSchema = new mongoose.Schema({
   poseConfig: { type: poseConfigSchema, default: () => ({}) },
   dueAt: { type: Date }, // when exercise should be performed
   dueNotifiedAt: { type: Date }, // when a due notification was sent
+  upcomingNotifiedAt: { type: Date }, // when an upcoming (advance) notice was sent
   dailyReminder: { type: Boolean, default: false }, // send daily reminder until completed
   lastDailyReminderDate: { type: Date }, // date (midnight) last reminder sent
   createdAt: { type: Date, default: Date.now }

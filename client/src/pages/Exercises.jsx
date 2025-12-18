@@ -10,6 +10,18 @@ export default function Exercises() {
   const [loading, setLoading] = useState(false);
   const [patients, setPatients] = useState([]);
   const [patientsLoading, setPatientsLoading] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [assignForm, setAssignForm] = useState({
+    templateId: '',
+    selectedPatients: new Set(),
+    title: '',
+    description: '',
+    type: 'exercise', // exercise | game
+    gameType: 'memory', // memory | stroop
+    dueAt: '',
+    dailyReminder: false
+  });
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [selectedExerciseIds, setSelectedExerciseIds] = useState(new Set());
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -42,6 +54,19 @@ export default function Exercises() {
     setPatientsLoading(false);
   };
 
+  const fetchTemplates = async () => {
+    setTemplatesLoading(true);
+    try {
+      const res = await authFetch('http://localhost:5000/api/templates');
+      const data = await res.json();
+      if (data.success) setTemplates(data.templates || []);
+    } catch (err) {
+      console.error('Failed to load templates', err);
+      push('Failed to load templates', 'error');
+    }
+    setTemplatesLoading(false);
+  };
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -52,6 +77,7 @@ export default function Exercises() {
   useEffect(() => {
     if (user?.role === 'therapist') {
       fetchPatients();
+      fetchTemplates();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role]);
@@ -118,18 +144,136 @@ export default function Exercises() {
     return names.join(', ');
   };
 
-  // Therapist view: create and manage exercises
+  const toggleAssignPatient = (id) => {
+    setAssignForm((prev) => {
+      const next = new Set(prev.selectedPatients);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return { ...prev, selectedPatients: next };
+    });
+  };
+
+  const submitAssignment = async () => {
+    if (!assignForm.templateId) return push('Select a template', 'error');
+    if (assignForm.selectedPatients.size === 0) return push('Select at least one patient', 'error');
+    try {
+      const body = {
+        assignedTo: Array.from(assignForm.selectedPatients),
+        overrides: {
+          title: assignForm.title || undefined,
+          description: assignForm.description || undefined,
+          metadata: {
+            assignmentType: assignForm.type,
+            gameType: assignForm.type === 'game' ? assignForm.gameType : undefined
+          }
+        },
+        dueAt: assignForm.dueAt || undefined,
+        dailyReminder: assignForm.dailyReminder
+      };
+      const res = await authFetch(`http://localhost:5000/api/templates/${assignForm.templateId}/instantiate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (data.success) {
+        push('Assignment created', 'success');
+        setAssignForm({
+          ...assignForm,
+          selectedPatients: new Set(),
+          title: '',
+          description: '',
+          dueAt: '',
+          dailyReminder: false
+        });
+        fetchExercises();
+      } else {
+        push(data.error || 'Failed to assign', 'error');
+      }
+    } catch (e) {
+      console.error('assign error', e);
+      push('Failed to assign', 'error');
+    }
+  };
+
+  // Therapist view: assign and manage exercises/games
   if (user?.role === 'therapist') {
     return (
       <main role="main" className="min-h-screen p-8 bg-gray-900 text-gray-100">
         <div className="max-w-3xl mx-auto bg-gray-800 p-6 rounded shadow">
-          <h1 className="text-2xl font-bold mb-2">Exercises</h1>
-          <p className="text-gray-300 mb-4">Create and assign exercises to patients.</p>
-          <div className="mb-4">
-            <Link to="/exercises/new" className="bg-indigo-600 text-white px-4 py-2 rounded">Create Exercise</Link>
-            <button onClick={fetchExercises} className="ml-3 bg-gray-700 text-white px-3 py-2 rounded">Refresh</button>
-            <Link to="/templates" className="ml-3 bg-gray-700 text-white px-3 py-2 rounded">Templates</Link>
-          </div>
+          <h1 className="text-2xl font-bold mb-2">Assignments</h1>
+          <p className="text-gray-300 mb-4">Assign exercises or cognitive games from templates to patients with schedules and reminders.</p>
+
+          <section className="mb-6 p-4 bg-gray-900 rounded border border-gray-700">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
+              <div>
+                <div className="text-lg font-semibold">Assign from template</div>
+                <p className="text-sm text-gray-400">Pick a template, choose patients, optionally set due date and daily reminders.</p>
+              </div>
+              <Link to="/templates" className="bg-gray-700 text-white px-3 py-2 rounded">Manage templates</Link>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="text-sm">
+                Template
+                <select
+                  value={assignForm.templateId}
+                  onChange={(e)=>setAssignForm({...assignForm, templateId: e.target.value})}
+                  className="w-full p-2 bg-gray-700 rounded mt-1"
+                >
+                  <option value="">{templatesLoading ? 'Loading...' : 'Select template'}</option>
+                  {templates.map(t => <option key={t._id} value={t._id}>{t.title}</option>)}
+                </select>
+              </label>
+              <label className="text-sm">
+                Assignment title (optional)
+                <input value={assignForm.title} onChange={(e)=>setAssignForm({...assignForm, title:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+              </label>
+              <label className="text-sm">
+                Description (optional)
+                <input value={assignForm.description} onChange={(e)=>setAssignForm({...assignForm, description:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+              </label>
+              <label className="text-sm">
+                Type
+                <select value={assignForm.type} onChange={(e)=>setAssignForm({...assignForm, type:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1">
+                  <option value="exercise">Physical exercise</option>
+                  <option value="game">Cognitive game</option>
+                </select>
+              </label>
+              {assignForm.type === 'game' && (
+                <label className="text-sm">
+                  Game
+                  <select value={assignForm.gameType} onChange={(e)=>setAssignForm({...assignForm, gameType:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1">
+                    <option value="memory">Memory</option>
+                    <option value="stroop">Stroop</option>
+                  </select>
+                </label>
+              )}
+              <label className="text-sm">
+                Due date/time
+                <input type="datetime-local" value={assignForm.dueAt} onChange={(e)=>setAssignForm({...assignForm, dueAt:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+              </label>
+              <label className="text-sm flex items-center gap-2 mt-6">
+                <input type="checkbox" checked={assignForm.dailyReminder} onChange={(e)=>setAssignForm({...assignForm, dailyReminder:e.target.checked})} />
+                Daily reminder until completed
+              </label>
+            </div>
+            <div className="mt-3">
+              <div className="text-sm text-gray-300 mb-1">Assign to patients</div>
+              <div className="max-h-32 overflow-auto bg-gray-800 p-2 rounded">
+                {patients.map(p => (
+                  <label key={p._id} className="flex items-center gap-2 p-1 text-sm">
+                    <input type="checkbox" checked={assignForm.selectedPatients.has(p._id)} onChange={()=>toggleAssignPatient(p._id)} />
+                    <span>{p.name} ({p.email || 'no email'})</span>
+                  </label>
+                ))}
+                {patients.length === 0 && <div className="text-xs text-gray-400">No patients yet.</div>}
+              </div>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button onClick={submitAssignment} className="bg-indigo-600 text-white px-4 py-2 rounded">Assign</button>
+              <button onClick={fetchExercises} className="bg-gray-700 text-white px-3 py-2 rounded">Refresh</button>
+            </div>
+          </section>
+
           <div className="mb-6 p-4 bg-gray-900 rounded border border-gray-700">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div>
@@ -190,8 +334,8 @@ export default function Exercises() {
             )}
           </div>
           <div>
-            <h2 className="text-lg font-semibold mb-2">Existing exercises</h2>
-            {loading ? <p>Loading...</p> : exercises.length === 0 ? <p className="text-gray-400">No exercises yet.</p> : (
+            <h2 className="text-lg font-semibold mb-2">Existing assignments</h2>
+            {loading ? <p>Loading...</p> : exercises.length === 0 ? <p className="text-gray-400">No assignments yet.</p> : (
               <ul className="space-y-2">
                 {exercises.map((ex) => (
                   <li key={ex._id} className="p-2 bg-gray-900 rounded">

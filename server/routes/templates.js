@@ -3,6 +3,7 @@ import { verifyToken } from '../middleware/authMiddleware.js';
 import ExerciseTemplate from '../models/ExerciseTemplate.js';
 import Exercise from '../models/Exercise.js';
 import User from '../models/User.js';
+import { createNotification } from '../utils/createNotification.js';
 
 const router = express.Router();
 
@@ -59,7 +60,7 @@ router.post('/:id/instantiate', verifyToken, async (req, res) => {
     const tpl = await ExerciseTemplate.findById(id);
     if (!tpl) return res.status(404).json({ success: false, error: 'Template not found' });
 
-    const { assignedTo = [], overrides = {} } = req.body || {};
+    const { assignedTo = [], overrides = {}, dueAt, dailyReminder } = req.body || {};
 
     // validate assigned users exist
     if (!Array.isArray(assignedTo)) return res.status(400).json({ success: false, error: 'assignedTo must be an array of user IDs' });
@@ -104,9 +105,15 @@ router.post('/:id/instantiate', verifyToken, async (req, res) => {
       poseConfig: { ...(tpl.poseConfig?.toObject?.() || tpl.poseConfig || {}), ...(overrides.poseConfig || {}) },
       createdBy: req.user.id,
       templateId: tpl._id,
-      overrides
+      overrides,
+      dueAt: dueAt ? new Date(dueAt) : undefined,
+      dailyReminder: !!dailyReminder
     });
     await exerciseDoc.save();
+    // notify assigned patients
+    for (const uid of validAssigned) {
+      await createNotification(uid, 'New activity assigned', `Your therapist assigned: ${exerciseDoc.title}`, { exerciseId: exerciseDoc._id, event: 'assigned', templateId: tpl._id });
+    }
     res.json({ success: true, exercise: exerciseDoc });
   } catch (e) {
     console.error('POST /api/templates/:id/instantiate', e);

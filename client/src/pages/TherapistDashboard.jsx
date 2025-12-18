@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Link } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from "../context/AuthContext";
 import UnreadBadge from "../components/UnreadBadge";
 
@@ -10,6 +10,8 @@ export default function TherapistDashboard() {
   const [recentResults, setRecentResults] = useState([]);
   const [loadingResults, setLoadingResults] = useState(false);
   const [schedule, setSchedule] = useState([]);
+  const [search, setSearch] = useState("");
+  const navigate = useNavigate();
 
   // Mock data used until API endpoints are added
   useEffect(() => {
@@ -70,6 +72,29 @@ export default function TherapistDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patients]);
 
+  const filteredPatients = useMemo(() => {
+    if (!search.trim()) return patients;
+    const q = search.toLowerCase();
+    return patients.filter(p =>
+      (p.name || '').toLowerCase().includes(q) ||
+      (p.email || '').toLowerCase().includes(q)
+    );
+  }, [patients, search]);
+
+  useEffect(() => {
+    // if current selection falls out of filtered list, pick the first filtered patient
+    if (filteredPatients.length === 0) {
+      setSelectedPatient(null);
+      setRecentResults([]);
+      return;
+    }
+    if (!selectedPatient || !filteredPatients.find(p => p._id === selectedPatient._id)) {
+      const first = filteredPatients[0];
+      setSelectedPatient(first);
+      fetchPatientResults(first._id);
+    }
+  }, [filteredPatients, selectedPatient]);
+
   const buildSchedule = (list) => {
     if (!Array.isArray(list)) return setSchedule([]);
     const start = new Date();
@@ -100,6 +125,7 @@ export default function TherapistDashboard() {
               <button className="w-full text-left px-3 py-2 rounded bg-gradient-to-r from-indigo-700 to-purple-600">Dashboard</button>
               <Link className="block px-3 py-2 rounded hover:bg-gray-700" to="/games">Games</Link>
               <Link className="block px-3 py-2 rounded hover:bg-gray-700" to="/exercises">Exercises</Link>
+              <Link className="block px-3 py-2 rounded hover:bg-gray-700" to="/therapist/calendar">Calendar</Link>
               <Link className="block px-3 py-2 rounded hover:bg-gray-700" to="/reports">Patient Reports</Link>
               <Link className="block px-3 py-2 rounded hover:bg-gray-700" to="/therapist/reports">Summary</Link>
               <Link className="flex items-center px-3 py-2 rounded hover:bg-gray-700" to="/therapist/notifications">
@@ -112,7 +138,7 @@ export default function TherapistDashboard() {
               </Link>
               <div className="mt-4 text-xs text-gray-400 px-2">Patients</div>
               <div className="max-h-48 overflow-auto mt-2">
-                {patients.map((p) => (
+                {filteredPatients.map((p) => (
                   <div
                     key={p._id}
                     onClick={() => { setSelectedPatient(p); fetchPatientResults(p._id); }}
@@ -133,8 +159,15 @@ export default function TherapistDashboard() {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-2xl font-semibold">Dashboard</h2>
               <div className="flex items-center gap-3">
-                <input className="px-3 py-2 rounded bg-gray-800 text-sm" placeholder="Search patients..." />
-                <button className="px-3 py-2 bg-indigo-600 rounded text-sm">New Patient</button>
+                <input
+                  className="px-3 py-2 rounded bg-gray-800 text-sm"
+                  placeholder="Search patients..."
+                  value={search}
+                  onChange={(e)=>setSearch(e.target.value)}
+                />
+                <button className="px-3 py-2 bg-indigo-600 rounded text-sm" onClick={()=>navigate('/register')}>
+                  New Patient
+                </button>
               </div>
             </div>
 
@@ -204,7 +237,7 @@ export default function TherapistDashboard() {
                   <div className="text-xs text-gray-400">Last active: {selectedPatient.lastActive}</div>
 
                   <div className="mt-4 flex gap-2">
-                    <button onClick={() => assignExercise(selectedPatient.id)} className="px-3 py-2 bg-indigo-600 rounded">Assign Exercise</button>
+                    <button onClick={() => assignExercise(selectedPatient._id)} className="px-3 py-2 bg-indigo-600 rounded">Assign Exercise</button>
                     <button onClick={() => fetchPatientResults(selectedPatient._id)} className="px-3 py-2 bg-gray-600 rounded">View Results</button>
                   </div>
                 </div>
