@@ -169,9 +169,9 @@ router.get('/me/heart-rate/latest', verifyToken, async (req,res) => {
   try {
     const access = await ensureAccessToken(req.user.id);
     const candidateUrls = [
-      `${FITBIT_API}/1/user/-/activities/heart/date/today/1d.json`, // summary first (less likely to 429)
+      `${FITBIT_API}/1/user/-/activities/heart/date/today/1d/1sec.json`, // may fail / be empty for unapproved apps
       `${FITBIT_API}/1/user/-/activities/heart/date/today/1d/1min.json`,
-      `${FITBIT_API}/1/user/-/activities/heart/date/today/1d/1sec.json` // may fail / be empty for unapproved apps
+      `${FITBIT_API}/1/user/-/activities/heart/date/today/1d.json` // summary only
     ];
     let last = null; let used = null; let rawResponses = []; let summaryFallback = null; let rateLimited = false;
     for (const url of candidateUrls) {
@@ -188,20 +188,14 @@ router.get('/me/heart-rate/latest', verifyToken, async (req,res) => {
           ? { len: data['activities-heart-intraday'].dataset?.length }
           : (summary || Object.keys(data))
       });
-      if (!r.ok && !rateLimited) continue;
-      // When rate limited, avoid hammering intraday endpoints; use summary/cached if present
-      if (rateLimited && summaryFallback) {
-        last = { value: summaryFallback.bpm, time: summaryFallback.time, source: summaryFallback.source || url };
-        used = url;
-        break;
-      }
+      if (!r.ok) continue;
       const series = data['activities-heart-intraday']?.dataset || [];
       if (series.length) { last = series[series.length-1]; used = url; break; }
       // If summary endpoint, break even if empty to avoid extra loops
       if (!data['activities-heart-intraday']) {
         used = url;
         if (!last && summary) {
-          last = { value: summary.bpm, time: summary.time, source: summary.source || url };
+          last = { value: summary.bpm, time: summary.time, source: summary.source };
         }
         break;
       }
@@ -258,23 +252,17 @@ router.get('/me/heart-rate/last-available', verifyToken, async (req,res) => {
     const access = await ensureAccessToken(req.user.id);
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone; // hint to client, Fitbit uses account TZ
     const today = new Date();
-    let found = null; let summaryFallback = null; let rateLimited = false;
+    let found = null; let summaryFallback = null;
     for (let i = 0; i < 7; i++) {
       const d = new Date(today.getTime() - i*24*60*60*1000);
       const yyyy = d.getFullYear();
       const mm = String(d.getMonth()+1).padStart(2,'0');
       const dd = String(d.getDate()).padStart(2,'0');
       const dateStr = `${yyyy}-${mm}-${dd}`;
-      // Try summary first to dodge intraday rate limits, then 1min detail if allowed
-      const urls = [
-        `${FITBIT_API}/1/user/-/activities/heart/date/${dateStr}/1d.json`,
-        `${FITBIT_API}/1/user/-/activities/heart/date/${dateStr}/1d/1min.json`
-      ];
-      for (const url of urls) {
+      const url = `${FITBIT_API}/1/user/-/activities/heart/date/${dateStr}/1d/1min.json`;
       const r = await fetch(url, { headers:{ 'Authorization':`Bearer ${access}` } });
       const data = await r.json();
-        if (r.status === 429) { rateLimited = true; }
-        if (!r.ok && !rateLimited) continue;
+      if (!r.ok) continue;
       const summary = extractSummaryBpm(data);
       if (summary && !summaryFallback) summaryFallback = { bpm: summary.bpm, time: summary.time, date: dateStr, source: summary.source };
       const series = data['activities-heart-intraday']?.dataset || [];
@@ -283,13 +271,6 @@ router.get('/me/heart-rate/last-available', verifyToken, async (req,res) => {
         found = { bpm: last.value, time: last.time, date: dateStr };
         break;
       }
-        // If summary endpoint, use it and skip the rest
-        if (!data['activities-heart-intraday'] && summary) {
-          found = summaryFallback;
-          break;
-        }
-      }
-      if (found) break;
     }
     if (!found && summaryFallback) {
       found = summaryFallback;
@@ -369,7 +350,6 @@ router.get('/me/debug', verifyToken, async (req, res) => {
   } catch (e) { console.error('fitbit me debug error', e); res.status(500).json({ success:false, error:'Server error' }); }
 });
 
-// Try to refresh the stored refresh token (will not return tokens)
 router.post('/me/force-refresh', verifyToken, async (req, res) => {
   try {
     const u = await User.findById(req.user.id).lean();
