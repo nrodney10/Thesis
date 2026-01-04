@@ -11,6 +11,7 @@ export default function PatientDashboard() {
   const [loading, setLoading] = useState(false);
   const [heartRate, setHeartRate] = useState(null);
   const [fallbackHR, setFallbackHR] = useState(null); // last available from prior days
+  const [heartRateSource, setHeartRateSource] = useState(null); // live | summary | cached
   const [fitbitStatus, setFitbitStatus] = useState('checking'); // checking | connected | not-connected | error
 
   const fetchResults = async () => {
@@ -41,17 +42,33 @@ export default function PatientDashboard() {
           setFitbitStatus('connected');
           // Then fetch latest heart rate
           const hrRes = await authFetch('http://localhost:5000/api/fitbit/me/heart-rate/latest');
-          if (hrRes.status === 404) { setHeartRate(null); }
+          if (hrRes.status === 404) { setHeartRate(null); setHeartRateSource(null); }
           else {
             const hrData = await hrRes.json();
-            if (hrData.success) setHeartRate(hrData.bpm);
+            if (hrData.success) {
+              // Preserve previous live value when rate-limited/no new data
+              if (hrData.bpm != null) {
+                setHeartRate(hrData.bpm);
+                setHeartRateSource(hrData.source || null);
+                if (hrData.source?.includes('cached') || (hrData.source || '').startsWith('summary')) {
+                  setFallbackHR({ bpm: hrData.bpm, when: hrData.time || 'today' });
+                }
+              } else if (!hrData.rateLimited) {
+                // only clear if not rate limited; otherwise keep last shown value
+                setHeartRate(null);
+                setHeartRateSource(hrData.source || null);
+              }
+            }
           }
           // If still null, try last-available once to show something
           if (!heartRate) {
             try {
               const laRes = await authFetch('http://localhost:5000/api/fitbit/me/heart-rate/last-available');
               const la = await laRes.json();
-              if (la.success && la.found) setFallbackHR({ bpm: la.found.bpm, when: `${la.found.date} ${la.found.time}` });
+              if (la.success && la.found) {
+                setFallbackHR({ bpm: la.found.bpm, when: `${la.found.date || 'recent'} ${la.found.time || ''}`.trim() });
+                setHeartRateSource((s) => s || la.found.source || 'last-available');
+              }
             } catch (_) {}
           }
         }
@@ -62,6 +79,9 @@ export default function PatientDashboard() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const displayBpm = heartRate ?? fallbackHR?.bpm ?? '--';
+  const isStale = (heartRateSource && heartRateSource.includes('cached')) || (heartRateSource || '').startsWith('summary') || (!heartRate && !!fallbackHR);
 
   return (
     <div className="min-h-screen p-8 bg-gray-900 text-gray-100">
@@ -125,13 +145,23 @@ export default function PatientDashboard() {
                   <div className="p-4 bg-gray-800 rounded shadow">
                     <div className="text-xs text-gray-300">Heart rate</div>
                     <div className="text-2xl font-bold mt-1">
-                      {fitbitStatus === 'connected' ? (heartRate ?? '—') : fitbitStatus === 'checking' ? '…' : '—'}
+                      {fitbitStatus === 'connected'
+                        ? displayBpm
+                        : fitbitStatus === 'checking'
+                          ? '...'
+                          : '--'}
                       {fitbitStatus === 'connected' && ' bpm'}
                     </div>
                     <div className="text-xs mt-1">
                       {fitbitStatus === 'connected' && (
                         <>
-                          {heartRate != null ? <span className="text-green-400">live</span> : fallbackHR ? <span className="text-yellow-300">last: {fallbackHR.bpm} bpm ({fallbackHR.when})</span> : <span className="text-gray-400">waiting for sync…</span>}
+                          {isStale
+                            ? <span className="text-yellow-300">last: {fallbackHR?.bpm ?? heartRate} bpm{fallbackHR?.when ? ` (${fallbackHR.when})` : ''}</span>
+                            : heartRate != null
+                              ? <span className="text-green-400">live</span>
+                              : fallbackHR
+                                ? <span className="text-yellow-300">last: {fallbackHR.bpm} bpm ({fallbackHR.when})</span>
+                                : <span className="text-gray-400">waiting for sync...</span>}
                           <button onClick={()=>{
                             const t = localStorage.getItem('token') || sessionStorage.getItem('token');
                             const url = `http://localhost:5000/api/fitbit/reset-and-connect?token=${encodeURIComponent(t||'')}`;
@@ -147,7 +177,7 @@ export default function PatientDashboard() {
                         }} className="text-indigo-300 underline">Connect Fitbit</button>
                       )}
                       {fitbitStatus === 'error' && <span className="text-red-400">error</span>}
-                      {fitbitStatus === 'checking' && <span className="text-gray-400">checking…</span>}
+                      {fitbitStatus === 'checking' && <span className="text-gray-400">checking...</span>}
                     </div>
                   </div>
                 </div>

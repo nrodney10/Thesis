@@ -152,7 +152,7 @@ export default function ExerciseRunner() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       mediaStreamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
-      // after video attaches, size the overlay canvas to match displayed size
+      
       setTimeout(() => {
         const v = videoRef.current, c = canvasRef.current;
         if (v && c) { const r = v.getBoundingClientRect(); c.width = r.width; c.height = r.height; }
@@ -162,7 +162,7 @@ export default function ExerciseRunner() {
       mr.ondataavailable = (e) => { if (e.data && e.data.size) recordedChunksRef.current.push(e.data); };
       mr.onstop = () => { const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' }); setRecordingBlobUrl(URL.createObjectURL(blob)); };
       mediaRecorderRef.current = mr;
-      // If pose estimation is enabled, lazy-load detector and start processing
+      
       if (enablePose) await startPoseDetector();
     } catch (err) {
       console.error('Media start error', err);

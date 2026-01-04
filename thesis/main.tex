@@ -1,0 +1,164 @@
+\documentclass[12pt,a4paper]{report}
+
+% Encoding and language
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+
+% Layout
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{setspace}
+\onehalfspacing
+
+% Graphics, tables, code
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{listings}
+\usepackage{xcolor}
+
+% Hyperlinks
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+
+% Bibliography (choose your backend; biblatex here)
+\usepackage[backend=biber,style=ieee]{biblatex}
+\addbibresource{references.bib}
+
+% Code block style
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  numbers=left,
+  numberstyle=\tiny,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{teal}
+}
+
+% Title data (fill these)
+\newcommand{\ProjectTitle}{<Your Project Title>}
+\newcommand{\AuthorName}{<Your Name>}
+\newcommand{\StudentID}{<Your Student ID>}
+\newcommand{\StudyProgramme}{Biomedical Engineering}
+\newcommand{\Specialization}{Information Systems in Medicine}
+\newcommand{\SupervisorName}{Dr inz. Marcin Rudzki}
+\newcommand{\SupervisorDept}{Department of Medical Informatics and Artificial Intelligence}
+\newcommand{\SupervisorFaculty}{Faculty of Biomedical Engineering}
+\newcommand{\ThesisYear}{2025}
+\newcommand{\LogoPath}{logo.png} % place the provided logo at thesis/logo.png
+
+\begin{document}
+
+\begin{titlepage}
+  \centering
+  \vspace*{0.5cm}
+  \IfFileExists{\LogoPath}{\includegraphics[width=0.35\textwidth]{\LogoPath}\par}{}
+  \vspace*{1cm}
+  {\Large BACHELOR PROJECT\par}
+  \vspace{1.5cm}
+  {\LARGE ``\ProjectTitle''\par}
+  \vspace{2cm}
+  {\Large \AuthorName\par}
+  {\large \StudentID\par}
+  \vspace{1cm}
+  {\large Study programme: \StudyProgramme\par}
+  {\large Specialization: \Specialization\par}
+  \vspace{2cm}
+  {\large SUPERVISOR\par}
+  {\large \SupervisorName\par}
+  {\large \SupervisorDept\par}
+  {\large \SupervisorFaculty\par}
+  \vfill
+  {\Large ZABRZE \ThesisYear\par}
+\end{titlepage}
+
+\pagenumbering{roman}
+\tableofcontents
+\clearpage
+
+\begin{abstract}
+Summarize the motivation, method, key results, and contributions in 150--250 words.
+\end{abstract}
+
+\clearpage
+\pagenumbering{arabic}
+
+\chapter{Introduction}
+\begin{itemize}
+  \item Problem statement and context (rehabilitation, remote monitoring, wearables).
+  \item Objectives and research questions/hypotheses.
+  \item Contributions (e.g., Fitbit-integrated rehab app, pose estimation, patient dashboard).
+  \item Thesis structure overview.
+\end{itemize}
+
+\chapter{Background and Related Work}
+\begin{itemize}
+  \item Digital health / tele-rehabilitation platforms and adherence.
+  \item Wearables and Fitbit API (OAuth2, scope, data availability/rate limits).
+  \item Pose estimation for exercise monitoring (e.g., MoveNet).
+  \item Brief survey of similar systems and gaps.
+\end{itemize}
+
+\chapter{System Design}
+\begin{itemize}
+  \item Architecture overview (frontend React, backend Express, MongoDB).
+  \item Data flow: authentication, Fitbit OAuth2, HR polling, result submission.
+  \item Sequence diagrams for dashboard HR polling and exercise submission.
+  \item Security/privacy considerations (tokens, storage, roles).
+\end{itemize}
+
+\chapter{Implementation}
+\begin{itemize}
+  \item Frontend: PatientDashboard, ExerciseRunner (pose detection, video capture, HR display).
+  \item Backend: Fitbit routes (PKCE flow, summary/intraday fallbacks, caching), results API.
+  \item Data models: users, exercises, results, notifications (include schema snippets).
+  \item Error handling and fallbacks (rate limits, cached HR, summary HR).
+\end{itemize}
+
+\chapter{Evaluation}
+\begin{itemize}
+  \item Functional tests (OAuth flow, HR retrieval, exercise recording).
+  \item Performance (poll intervals, response times).
+  \item Reliability under constraints (429 rate limits, no-sensor data scenarios).
+  \item Usability/heuristic review (if no user study).
+\end{itemize}
+
+\chapter{Results}
+\begin{itemize}
+  \item Present findings from tests/experiments.
+  \item Screenshots or figures of the dashboard and exercise runner.
+  \item Any measured metrics (latency, success rate, correctness of HR fallback).
+\end{itemize}
+
+\chapter{Discussion}
+\begin{itemize}
+  \item Interpret results relative to objectives/questions.
+  \item Limitations (Fitbit data availability, rate limits, pose estimation robustness).
+  \item Threats to validity.
+\end{itemize}
+
+\chapter{Future Work}
+\begin{itemize}
+  \item Alternative wearables/providers; better buffering/caching.
+  \item Improved coaching/pose feedback; clinician analytics; offline support.
+\end{itemize}
+
+\chapter{Conclusion}
+\begin{itemize}
+  \item Summarize contributions and outcomes.
+  \item Reflect on impact and next steps.
+\end{itemize}
+
+\printbibliography
+
+\appendix
+\chapter{Appendix}
+\begin{itemize}
+  \item Environment setup and run instructions.
+  \item API endpoints summary.
+  \item Additional figures or code listings as needed.
+\end{itemize}
+
+\end{document}
