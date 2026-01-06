@@ -63,4 +63,30 @@ router.get('/therapist', verifyToken, async (req, res) => {
   }
 });
 
+// Therapist view: upcoming activities for a specific patient (therapist only)
+router.get('/patient/:id', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ success:false, error:'Missing patient id' });
+    const patient = await User.findById(id);
+    if (!patient || patient.role !== 'patient') return res.status(404).json({ success:false, error:'Patient not found' });
+    // ensure the patient is assigned to this therapist
+    if (String(patient.therapistId) !== String(req.user.id)) return res.status(403).json({ success:false, error:'Forbidden' });
+
+    const now = new Date();
+    const in30 = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const items = await Exercise.find({
+      assignedTo: patient._id,
+      createdBy: req.user.id,
+      $or: [ { dueAt: { $gte: now, $lte: in30 } }, { dailyReminder: true } ]
+    }).populate('createdBy', 'name').limit(200);
+    const mapped = items.map(ex => ({ id: ex._id, title: ex.title, description: ex.description, dueAt: ex.dueAt, dailyReminder: ex.dailyReminder, createdBy: ex.createdBy, type: 'exercise' }));
+    res.json({ success:true, items: mapped });
+  } catch (e) {
+    console.error('calendar patient/:id error', e);
+    res.status(500).json({ success:false, error:'Server error' });
+  }
+});
+
 export default router;

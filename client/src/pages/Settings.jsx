@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 
 export default function Settings() {
   const { authFetch, login } = useAuth();
-  const [profile, setProfile] = useState({ name: '', age: 0, email: '' });
+  const [profile, setProfile] = useState({ name: '', age: 0, email: '', vulnerabilityTags: '', vulnerabilityNotes: '' });
   const [pw, setPw] = useState({ currentPassword: '', newPassword: '' });
   const [msg, setMsg] = useState('');
 
@@ -11,14 +11,26 @@ export default function Settings() {
     const load = async () => {
       const r = await authFetch('http://localhost:5000/api/user/me');
       const j = await r.json();
-      if (j.success && j.user) setProfile({ name: j.user.name, age: j.user.age, email: j.user.email });
+      if (j.success && j.user) {
+        const tags = j.user.vulnerabilityProfile?.tags?.join(', ') || '';
+        setProfile({ name: j.user.name, age: j.user.age, email: j.user.email, vulnerabilityTags: tags, vulnerabilityNotes: j.user.vulnerabilityProfile?.notes || '' });
+      }
     };
     load();
   }, [authFetch]);
 
   const saveProfile = async (e) => {
     e.preventDefault(); setMsg('');
-    const r = await authFetch('http://localhost:5000/api/user/me', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(profile) });
+    const body = {
+      name: profile.name,
+      age: profile.age,
+      email: profile.email,
+      vulnerabilityProfile: {
+        tags: profile.vulnerabilityTags.split(',').map(t=>t.trim()).filter(Boolean),
+        notes: profile.vulnerabilityNotes
+      }
+    };
+    const r = await authFetch('http://localhost:5000/api/user/me', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const j = await r.json();
     if (j.success) { setMsg('Profile updated'); login({ token: localStorage.getItem('token') || sessionStorage.getItem('token'), user: j.user, remember: true }); }
   };
@@ -48,6 +60,14 @@ export default function Settings() {
           <div>
             <label className="block text-sm">Email</label>
             <input type="email" value={profile.email} onChange={e=>setProfile({...profile, email:e.target.value})} className="w-full bg-gray-700 p-2 rounded" />
+          </div>
+          <div>
+            <label className="block text-sm">Vulnerability tags (comma-separated)</label>
+            <input value={profile.vulnerabilityTags} onChange={e=>setProfile({...profile, vulnerabilityTags:e.target.value})} className="w-full bg-gray-700 p-2 rounded" placeholder="e.g., knee, balance, fall-risk" />
+          </div>
+          <div>
+            <label className="block text-sm">Vulnerability notes</label>
+            <textarea value={profile.vulnerabilityNotes} onChange={e=>setProfile({...profile, vulnerabilityNotes:e.target.value})} className="w-full bg-gray-700 p-2 rounded" rows={3} />
           </div>
           <button className="bg-indigo-600 px-3 py-2 rounded">Save profile</button>
         </form>

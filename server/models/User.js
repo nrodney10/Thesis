@@ -7,6 +7,13 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   role: { type: String, enum: ["patient", "therapist"], required: true },
   therapistId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // patient -> therapist link
+  vulnerabilityProfile: {
+    tags: [{ type: String }],
+    notes: { type: String }
+  },
+  pendingTherapistId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  resetPasswordToken: { type: String },
+  resetPasswordExpires: { type: Date },
   fitbit: {
     accessToken: { type: String },
     refreshToken: { type: String },

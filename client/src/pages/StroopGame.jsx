@@ -5,7 +5,7 @@ import { useToast } from "../context/ToastContext";
 
 const COLORS = ["red", "green", "blue", "orange", "purple"];
 
-export default function StroopGame() {
+export default function StroopGame({ assignmentId, assignmentTitle, gameKey = 'stroop', onFinished }) {
   const navigate = useNavigate();
   const { authFetch } = useAuth();
   const { push } = useToast();
@@ -19,7 +19,6 @@ export default function StroopGame() {
 
   useEffect(() => {
     next();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const next = () => {
@@ -41,7 +40,7 @@ export default function StroopGame() {
 
   const finish = async (allTimes) => {
     const avg = Math.round(allTimes.reduce((a, b) => a + b, 0) / allTimes.length);
-    const payload = { exerciseId: 'stroop', type: 'cognitive', score: score, metadata: { avgRTms: avg, trials: allTimes.length } };
+    const payload = { exerciseId: assignmentId || 'stroop', type: 'cognitive', score: score, metadata: { avgRTms: avg, trials: allTimes.length, gameKey } };
     try {
       const res = await authFetch('http://localhost:5000/api/results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await res.json();
@@ -51,14 +50,13 @@ export default function StroopGame() {
       console.error(err);
       push('Error submitting Stroop result', 'error');
     }
-    navigate('/patient');
+    if (onFinished) onFinished();
+    else navigate('/patient');
   };
 
-  // keyboard support: Enter to start/next, 1/2/3 to choose option, Space to toggle selected
   useEffect(() => {
     const onKey = (e) => {
       const running = startTime !== null;
-      // Enter: if not started, start (advance to first); if running, submit selected option
       if (!running && e.key === 'Enter') {
         next();
         return;
@@ -68,20 +66,17 @@ export default function StroopGame() {
         handleAnswer(choice);
         return;
       }
-      // number keys 1-5 map to COLORS indices
       if (['1', '2', '3', '4', '5'].includes(e.key)) setSelectedOption(Number(e.key) - 1);
-      // Space cycles selection
       if (e.code === 'Space') setSelectedOption((s) => (s === null ? 0 : (s + 1) % COLORS.length));
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedOption, startTime, trial, startTime]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white p-8">
       <div className="bg-gray-800 p-6 rounded shadow max-w-lg w-full text-center">
-        <h2 className="text-xl mb-4">Stroop Test</h2>
+        <h2 className="text-xl mb-4">{assignmentTitle || 'Stroop Test'}</h2>
         <div className="mb-4">
           <div style={{ color: current.color }} className="text-4xl font-bold">{current.word.toUpperCase()}</div>
         </div>
@@ -90,7 +85,7 @@ export default function StroopGame() {
             <button key={c} onClick={() => handleAnswer(c)} className="py-2 rounded" style={{ background: c, color: 'white' }}>{c}</button>
           ))}
         </div>
-        <div className="mt-4 text-sm text-gray-300">Trial: {trial+1}/15 â€¢ Score: {score}</div>
+        <div className="mt-4 text-sm text-gray-300">Trial: {trial+1}/15 — Score: {score}</div>
       </div>
     </div>
   );

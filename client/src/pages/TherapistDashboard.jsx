@@ -6,11 +6,14 @@ import UnreadBadge from "../components/UnreadBadge";
 export default function TherapistDashboard() {
   const { user, authFetch, logout, notificationsUnread, messagesUnread } = useAuth();
   const [patients, setPatients] = useState([]);
+  const [availablePatients, setAvailablePatients] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [recentResults, setRecentResults] = useState([]);
   const [loadingResults, setLoadingResults] = useState(false);
   const [schedule, setSchedule] = useState([]);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [therapistLink, setTherapistLink] = useState({ patientId: '', status: '' });
   const navigate = useNavigate();
 
   // Mock data used until API endpoints are added
@@ -27,6 +30,13 @@ export default function TherapistDashboard() {
             fetchPatientResults(data.patients[0]._id);
           }
         }
+        // also fetch available patients for assignment
+        try {
+          const r2 = await authFetch('http://localhost:5000/api/patients/available');
+          const j2 = await r2.json();
+          if (j2.success) setAvailablePatients(j2.patients || []);
+        } catch (e) { console.warn('failed to load available patients', e); }
+        fetchSchedule();
       } catch (err) {
         console.error("Failed to load patients", err);
       }
@@ -42,7 +52,7 @@ export default function TherapistDashboard() {
       const data = await res.json();
       if (data.success) {
         setPatients(data.patients || []);
-        buildSchedule(data.patients || []);
+        fetchSchedule();
       }
     } catch (err) {
       console.error("Failed to fetch patients", err);
@@ -61,16 +71,91 @@ export default function TherapistDashboard() {
     setLoadingResults(false);
   };
 
-  // Example action: assign exercise (placeholder)
+  // Navigate to Exercises page and preselect patient for assignment
   const assignExercise = (patientId) => {
-    alert(`Assigning exercise to ${patientId} (placeholder)`);
+    if (!patientId) return;
+    navigate(`/exercises?patientId=${patientId}`);
   };
 
-  // Build a simple schedule view from actual patient names
-  useEffect(() => {
-    buildSchedule(patients);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patients]);
+  const viewResultsForPatient = (patientId) => {
+    if (!patientId) return;
+    // Open the reports page filtered to this patient
+    navigate(`/reports?userId=${patientId}`);
+  };
+
+  const exportCsvForPatient = async (patientId) => {
+    try {
+      const url = `http://localhost:5000/api/reports/export.csv?userId=${patientId || ''}`;
+      const r = await authFetch(url);
+      const blob = await r.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = patientId ? `results-${patientId}.csv` : 'results-export.csv';
+      a.click();
+      URL.revokeObjectURL(downloadUrl);
+    } catch (e) {
+      console.error('Export CSV failed', e);
+      alert('Failed to export CSV');
+    }
+  };
+
+  const generatePdfForPatient = (patientId) => {
+    // Open the CSV in a new tab; user can print to PDF from browser.
+    const url = `http://localhost:5000/api/reports/export.csv?userId=${patientId || ''}`;
+    window.open(url, '_blank');
+  };
+
+  const assignTherapistToPatient = async () => {
+    if (!therapistLink.patientId) {
+      setTherapistLink((s)=>({ ...s, status:'Pick a patient first' }));
+      return;
+    }
+    setTherapistLink((s)=>({ ...s, status:'Assigning...' }));
+    try {
+      const res = await authFetch(`http://localhost:5000/api/patients/${therapistLink.patientId}/assign-therapist`, { method:'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setTherapistLink((s)=>({ ...s, status:'You are assigned as therapist' }));
+      } else {
+        setTherapistLink((s)=>({ ...s, status: data.message || 'Failed to assign' }));
+      }
+    } catch (e) {
+      console.error('assign therapist', e);
+      setTherapistLink((s)=>({ ...s, status:'Error assigning therapist' }));
+    }
+  };
+
+  const fetchSchedule = async () => {
+    setScheduleLoading(true);
+    try {
+      const res = await authFetch('http://localhost:5000/api/calendar/therapist');
+      const data = await res.json();
+      if (data.success) {
+        const items = (data.items || []).map(it => {
+          const when = it.dueAt ? new Date(it.dueAt) : null;
+          const hh = when ? String(when.getHours()).padStart(2, '0') : 'Any';
+          const mm = when ? String(when.getMinutes()).padStart(2, '0') : 'time';
+          const assignees = Array.isArray(it.assignedTo) ? it.assignedTo.map(p => p.name || p.email).join(', ') : '';
+          return {
+            id: it.id,
+            time: when ? `${hh}:${mm}` : 'Anytime',
+            title: it.title || 'Activity',
+            patient: assignees || 'Patient',
+            note: it.dailyReminder ? 'Daily reminder' : 'Scheduled activity',
+            when: when ? when.getTime() : Number.MAX_SAFE_INTEGER
+          };
+        }).sort((a, b) => a.when - b.when);
+        setSchedule(items);
+      } else {
+        setSchedule([]);
+      }
+    } catch (e) {
+      console.error('Failed to fetch schedule', e);
+      setSchedule([]);
+    }
+    setScheduleLoading(false);
+  };
 
   const filteredPatients = useMemo(() => {
     if (!search.trim()) return patients;
@@ -94,21 +179,6 @@ export default function TherapistDashboard() {
       fetchPatientResults(first._id);
     }
   }, [filteredPatients, selectedPatient]);
-
-  const buildSchedule = (list) => {
-    if (!Array.isArray(list)) return setSchedule([]);
-    const start = new Date();
-    start.setHours(10, 0, 0, 0); // 10:00 start
-    const slots = [];
-    const labels = ['Tele-session', 'Review', 'Check-in'];
-    list.slice(0, 6).forEach((p, i) => {
-      const t = new Date(start.getTime() + i * 45 * 60000); // 45-min increments
-      const hh = String(t.getHours()).padStart(2, '0');
-      const mm = String(t.getMinutes()).padStart(2, '0');
-      slots.push({ time: `${hh}:${mm}`, name: p.name || 'Patient', note: labels[i % labels.length] });
-    });
-    setSchedule(slots);
-  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100">
@@ -238,7 +308,7 @@ export default function TherapistDashboard() {
 
                   <div className="mt-4 flex gap-2">
                     <button onClick={() => assignExercise(selectedPatient._id)} className="px-3 py-2 bg-indigo-600 rounded">Assign Exercise</button>
-                    <button onClick={() => fetchPatientResults(selectedPatient._id)} className="px-3 py-2 bg-gray-600 rounded">View Results</button>
+                    <button onClick={() => viewResultsForPatient(selectedPatient._id)} className="px-3 py-2 bg-gray-600 rounded">View Results</button>
                   </div>
                 </div>
               ) : (
@@ -248,23 +318,48 @@ export default function TherapistDashboard() {
 
             <div className="bg-gray-800 rounded-lg p-4 mb-4 shadow">
               <h4 className="text-sm text-gray-300">Schedule</h4>
-              <ul className="mt-3 text-sm text-gray-200 space-y-2">
-                {schedule.length === 0 ? (
-                  <li className="text-gray-400">No patients yet.</li>
-                ) : (
-                  schedule.map((s, idx) => (
-                    <li key={idx}>{s.time} — {s.name} — {s.note}</li>
-                  ))
-                )}
-              </ul>
+              {scheduleLoading ? (
+                <div className="text-gray-400 text-sm mt-2">Loading schedule...</div>
+              ) : (
+                <ul className="mt-3 text-sm text-gray-200 space-y-2">
+                  {schedule.length === 0 ? (
+                    <li className="text-gray-400">No upcoming sessions.</li>
+                  ) : (
+                    schedule.slice(0, 6).map((s) => (
+                      <li key={s.id || `${s.time}-${s.title}`} className="flex items-center justify-between bg-gray-900/60 p-2 rounded">
+                        <div>
+                          <div className="text-xs text-gray-400">{s.time}</div>
+                          <div className="font-semibold">{s.title}</div>
+                          <div className="text-xs text-gray-400">{s.patient}</div>
+                        </div>
+                        <div className="text-[11px] text-gray-400">{s.note}</div>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              )}
+              <button onClick={fetchSchedule} className="mt-3 text-xs text-indigo-300 underline">Refresh schedule</button>
             </div>
 
             <div className="bg-gradient-to-br from-indigo-700 to-purple-600 rounded-lg p-4 shadow">
               <h4 className="text-sm text-white">Quick reports</h4>
-              <div className="mt-3 space-y-2">
-                <button className="w-full bg-white/10 text-white px-3 py-2 rounded text-sm">Export CSV</button>
-                <button className="w-full bg-white/10 text-white px-3 py-2 rounded text-sm">Generate PDF</button>
+                <div className="mt-3 space-y-2">
+                <button onClick={() => exportCsvForPatient(selectedPatient?._id)} className="w-full bg-white/10 text-white px-3 py-2 rounded text-sm">Export CSV</button>
+                <button onClick={() => generatePdfForPatient(selectedPatient?._id)} className="w-full bg-white/10 text-white px-3 py-2 rounded text-sm">Generate PDF</button>
               </div>
+            </div>
+
+            <div className="bg-gray-800 rounded-lg p-4 shadow mt-4">
+              <h4 className="text-sm text-gray-300">Assign yourself as therapist</h4>
+              <div className="flex items-center gap-2 mt-2">
+                <select value={therapistLink.patientId} onChange={e=>setTherapistLink({...therapistLink, patientId: e.target.value})} className="bg-gray-700 p-2 rounded text-sm w-full">
+                  <option value="">Select patient</option>
+                  {availablePatients.map(p=> <option key={p._id} value={p._id}>{p.name} — {p.email}</option>)}
+                </select>
+                <button onClick={assignTherapistToPatient} className="bg-green-600 px-3 py-2 rounded text-sm whitespace-nowrap">Assign</button>
+              </div>
+              {therapistLink.status && <div className="text-xs text-gray-300 mt-1">{therapistLink.status}</div>}
+              <div className="text-[11px] text-gray-400 mt-1">Patient will get a request and must accept you as their therapist.</div>
             </div>
           </aside>
         </div>

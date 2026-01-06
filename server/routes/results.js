@@ -131,8 +131,18 @@ router.get("/", verifyToken, async (req, res) => {
     }
 
     const filter = {};
-    if (queryUserId) filter.userId = queryUserId;
-    else filter.userId = req.user.id;
+    if (queryUserId) {
+      // therapists may request patient results only for patients assigned to them
+      if (req.user.role === 'therapist') {
+        const patient = await User.findById(queryUserId).select('therapistId');
+        if (!patient || String(patient.therapistId) !== String(req.user.id)) return res.status(403).json({ success:false, message:'Forbidden' });
+        filter.userId = queryUserId;
+      } else {
+        // patients cannot request other users
+        if (req.user.id !== queryUserId) return res.status(403).json({ success:false, message:'Forbidden' });
+        filter.userId = req.user.id;
+      }
+    } else filter.userId = req.user.id;
 
     const results = await Result.find(filter).sort({ createdAt: -1 }).limit(200);
     res.json({ success: true, results });

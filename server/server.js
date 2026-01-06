@@ -16,6 +16,7 @@ import indicatorsRoutes from "./routes/indicators.js";
 import calendarRoutes from "./routes/calendar.js";
 import Exercise from './models/Exercise.js';
 import { createNotification } from './utils/createNotification.js';
+import { autoAllocateForAllPatients } from './utils/autoAllocate.js';
 
 console.log("Starting RodRecover backend...");
 if (process.env.FITBIT_CLIENT_ID) {
@@ -94,6 +95,19 @@ setInterval(async () => {
     console.error('Reminder interval error', e);
   }
 }, 60000); // 60s
+
+// Periodic auto-allocation (runs every 6 hours) to assign tailored exercises based on vulnerabilities
+setInterval(async () => {
+  try {
+    const results = await autoAllocateForAllPatients({ limitPerPatient: 3 });
+    const createdTotal = results.filter(r => r.success && r.count > 0).reduce((sum, r) => sum + r.count, 0);
+    if (createdTotal > 0) {
+      console.log(`[auto-allocate] Created ${createdTotal} exercises across ${results.length} patients.`);
+    }
+  } catch (e) {
+    console.error('auto-allocate interval error', e);
+  }
+}, 6 * 60 * 60 * 1000); // every 6 hours
 
 const PORT = process.env.PORT || 5000;
 if (process.env.NODE_ENV !== 'test') {

@@ -11,14 +11,23 @@ router.get('/me', verifyToken, async (req, res) => {
   res.json({ success:true, user:u });
 });
 
-// Update profile (name, age, email)
+// Update profile (name, age, email, vulnerabilityProfile)
 router.put('/me', verifyToken, async (req, res) => {
   try {
-    const { name, age, email } = req.body;
+    const { name, age, email, vulnerabilityProfile } = req.body;
     const updates = {};
     if (name) updates.name = name;
     if (typeof age !== 'undefined') updates.age = age;
     if (email) updates.email = email;
+    if (vulnerabilityProfile && typeof vulnerabilityProfile === 'object') {
+      const tags = Array.isArray(vulnerabilityProfile.tags)
+        ? vulnerabilityProfile.tags.map((t) => String(t).trim()).filter(Boolean)
+        : [];
+      updates.vulnerabilityProfile = {
+        tags,
+        notes: vulnerabilityProfile.notes || ''
+      };
+    }
     const u = await User.findByIdAndUpdate(req.user.id, { $set: updates }, { new:true }).select('-password');
     res.json({ success:true, user:u });
   } catch (e) { res.status(500).json({ success:false, message:'Server error' }); }

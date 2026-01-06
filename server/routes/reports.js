@@ -8,9 +8,13 @@ const router = express.Router();
 router.get('/export.csv', verifyToken, async (req, res) => {
   try {
     const queryUserId = req.query.userId || req.user.id;
-    if (req.user.role === 'patient' && queryUserId !== req.user.id) {
-      return res.status(403).send('Forbidden');
-    }
+      if (req.user.role === 'patient' && queryUserId !== req.user.id) {
+        return res.status(403).send('Forbidden');
+      }
+      if (req.user.role === 'therapist' && queryUserId !== req.user.id) {
+        const patient = await (await import('../models/User.js')).default.findById(queryUserId).select('therapistId');
+        if (!patient || String(patient.therapistId) !== String(req.user.id)) return res.status(403).send('Forbidden');
+      }
     const items = await Result.find({ userId: queryUserId }).sort({ createdAt: -1 }).lean();
     const rows = items.map(r => ({
       id: r._id,
@@ -42,7 +46,11 @@ export default router;
 router.get('/summary', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success:false, message:'Forbidden' });
+    // restrict summary to patients assigned to this therapist
+    const patients = await (await import('../models/User.js')).default.find({ therapistId: req.user.id }).select('_id');
+    const patientIds = patients.map(p => p._id);
     const agg = await Result.aggregate([
+      { $match: { userId: { $in: patientIds } } },
       { $group: { _id: '$userId', count:{ $sum:1 }, avgScore:{ $avg:'$score' } } },
       { $sort: { avgScore: -1 } }
     ]);

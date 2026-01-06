@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 
 export default function Exercises() {
   const { user, authFetch } = useAuth();
@@ -12,16 +12,10 @@ export default function Exercises() {
   const [patientsLoading, setPatientsLoading] = useState(false);
   const [templates, setTemplates] = useState([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
-  const [assignForm, setAssignForm] = useState({
-    templateId: '',
-    selectedPatients: new Set(),
-    title: '',
-    description: '',
-    type: 'exercise', // exercise | game
-    gameType: 'memory', // memory | stroop
-    dueAt: '',
-    dailyReminder: false
-  });
+  const [assign, setAssign] = useState({ templateId: '', assignedTo: new Set(), overrides: { title: '', description: '', poseConfig: {}, metadata: {} }, dueAt: '', dailyReminder: false });
+  const [autoAlloc, setAutoAlloc] = useState({ patientId: '', status: '', vulnerabilities: '' });
+  const [lastMatches, setLastMatches] = useState([]);
+  
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [selectedExerciseIds, setSelectedExerciseIds] = useState(new Set());
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -67,12 +61,24 @@ export default function Exercises() {
     setTemplatesLoading(false);
   };
 
+
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     fetchExercises();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // honor optional ?patientId= in URL to preselect a patient when navigating from dashboard
+  useEffect(() => {
+    try {
+      const qp = new URLSearchParams(location.search);
+      const pid = qp.get('patientId');
+      if (pid) setSelectedPatientId(pid);
+    } catch (e) { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
 
   useEffect(() => {
     if (user?.role === 'therapist') {
@@ -82,14 +88,97 @@ export default function Exercises() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role]);
 
+  const sanitizePoseConfig = (cfg = {}) => {
+    const copy = JSON.parse(JSON.stringify(cfg));
+    if (copy.upAngle === '' || copy.upAngle === null) delete copy.upAngle;
+    if (copy.downAngle === '' || copy.downAngle === null) delete copy.downAngle;
+    if (copy.targets) {
+      if (Array.isArray(copy.targets.kneeRange)) {
+        const [a, b] = copy.targets.kneeRange;
+        if (!Number.isFinite(a) || !Number.isFinite(b)) delete copy.targets.kneeRange;
+      }
+      for (const key of Object.keys(copy.targets)) {
+        const val = copy.targets[key];
+        if (val === '' || val === null) delete copy.targets[key];
+      }
+      if (Object.keys(copy.targets).length === 0) delete copy.targets;
+    }
+    return copy;
+  };
+
+  const instantiate = async () => {
+    if (!assign.templateId) return push('Pick a template', 'error');
+    try {
+      const cleanedOverrides = { ...assign.overrides };
+      if (cleanedOverrides.poseConfig) cleanedOverrides.poseConfig = sanitizePoseConfig(cleanedOverrides.poseConfig);
+      // convert vulnerability tags string -> array if needed
+      if (cleanedOverrides.metadata && typeof cleanedOverrides.metadata.vulnerabilityTags === 'string') {
+        cleanedOverrides.metadata.vulnerabilityTags = cleanedOverrides.metadata.vulnerabilityTags.split(',').map(s=>s.trim()).filter(Boolean);
+      }
+      const body = { assignedTo: Array.from(assign.assignedTo), overrides: cleanedOverrides };
+      if (assign.dueAt) body.dueAt = assign.dueAt;
+      if (assign.dailyReminder) body.dailyReminder = assign.dailyReminder;
+      const res = await authFetch(`http://localhost:5000/api/templates/${assign.templateId}/instantiate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (data.success) {
+        push('Assignment created', 'success');
+        setAssign({ templateId: '', assignedTo: new Set(), overrides: { title: '', description: '', poseConfig: {}, metadata: {} }, dueAt: '', dailyReminder: false });
+        fetchExercises();
+      } else {
+        console.error('Instantiate error', data);
+        const msg = data.error || data.message || JSON.stringify(data);
+        push(`Failed to create from template: ${msg}`, 'error');
+      }
+    } catch (e) { console.error(e); push('Error creating from template', 'error'); }
+  };
+
+  const runAutoAllocate = async () => {
+    if (!autoAlloc.patientId) return push('Pick a patient to auto-allocate', 'error');
+    setAutoAlloc((s)=>({ ...s, status:'Running...' }));
+    try {
+      // If the therapist supplies vulnerability tags, use the generic endpoint which accepts tags
+      const hasTags = autoAlloc.vulnerabilities && String(autoAlloc.vulnerabilities).trim().length > 0;
+      let res;
+      if (hasTags) {
+        const vulnerabilities = autoAlloc.vulnerabilities.split(',').map(s=>s.trim()).filter(Boolean);
+        res = await authFetch(`http://localhost:5000/api/templates/auto-allocate`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ patientId: autoAlloc.patientId, vulnerabilities })
+        });
+      } else {
+        res = await authFetch(`http://localhost:5000/api/templates/auto-allocate/for-patient/${autoAlloc.patientId}`, {
+          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({})
+        });
+      }
+      const data = await res.json();
+      if (data.success) {
+        push(`Auto-allocated ${data.count || 0} exercise(s)`, 'success');
+        setAutoAlloc((s)=>({ ...s, status:`Created ${data.count || 0} exercise(s)` }));
+        setLastMatches(data.matches || []);
+        fetchExercises();
+      } else {
+        const msg = data.error || data.reason || 'No matches';
+        push(`No exercises auto-allocated: ${msg}`, 'error');
+        setAutoAlloc((s)=>({ ...s, status:`No matches: ${msg}` }));
+      }
+    } catch (e) {
+      console.error(e);
+      push('Auto-allocate failed', 'error');
+      setAutoAlloc((s)=>({ ...s, status:'Error' }));
+    }
+  };
+
   const isAssignedToPatient = (exercise, patientId) =>
     (exercise.assignedTo || []).some((uid) => {
       if (uid && typeof uid === 'object' && uid._id) return String(uid._id) === patientId;
       return String(uid) === patientId;
     });
 
+  const filteredExercises = exercises.filter((ex) => (ex.metadata?.assignmentType || 'exercise') !== 'game');
+
   const patientExercises = selectedPatientId
-    ? exercises.filter((ex) => isAssignedToPatient(ex, selectedPatientId))
+    ? filteredExercises.filter((ex) => isAssignedToPatient(ex, selectedPatientId))
     : [];
 
   const toggleSelection = (exerciseId) => {
@@ -131,6 +220,82 @@ export default function Exercises() {
       push('Failed to delete exercises', 'error');
     }
     setDeleteLoading(false);
+                <div className="mt-4 p-3 bg-gray-900 rounded border border-gray-700">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-lg font-semibold">Patient Schedule</div>
+                    <div>
+                      <button onClick={()=>{ setShowAddActivity(s=>!s); setScheduleForm({ ...scheduleForm, templateId: '', title:'', description:'', dueAt:'', dailyReminder:false }); }} className="px-3 py-1 bg-indigo-600 rounded text-white">{showAddActivity ? 'Close' : 'Add activity'}</button>
+                    </div>
+                  </div>
+                  <div className="text-sm text-gray-400 mb-2">Scheduled activities for {patientName(selectedPatientId)} (sorted by date)</div>
+                  <ul className="space-y-2 mb-3">
+                    {patientExercises.slice().sort((a,b)=> new Date(a.dueAt||0) - new Date(b.dueAt||0)).map((ex)=> (
+                      <li key={ex._id} className="p-2 bg-gray-800 rounded">
+                        <div className="font-medium">{ex.title} {ex.dailyReminder ? <span className="text-xs text-gray-300 ml-2">(daily)</span> : null}</div>
+                        <div className="text-xs text-gray-400">{ex.description}</div>
+                        <div className="text-xs text-gray-500">Due: {ex.dueAt ? new Date(ex.dueAt).toLocaleString() : 'No date'}</div>
+                      </li>
+                    ))}
+                    {patientExercises.length === 0 && <li className="text-gray-400">No scheduled activities.</li>}
+                  </ul>
+                  {showAddActivity && (
+                    <div className="p-3 bg-gray-800 rounded">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <label className="text-sm">Mode
+                          <select value={scheduleForm.mode} onChange={e=>setScheduleForm({...scheduleForm, mode:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1">
+                            <option value="template">From template</option>
+                            <option value="custom">Custom</option>
+                          </select>
+                        </label>
+                        <label className="text-sm">Due date
+                          <input type="date" value={scheduleForm.dueAt||''} onChange={e=>setScheduleForm({...scheduleForm, dueAt:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                        </label>
+                      </div>
+                      {scheduleForm.mode === 'template' ? (
+                        <div className="mt-2">
+                          <label className="text-sm">Template
+                            <select value={scheduleForm.templateId} onChange={e=>setScheduleForm({...scheduleForm, templateId: e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1">
+                              <option value="">Select template</option>
+                              {templates.map(t=> <option key={t._id} value={t._id}>{t.title}</option>)}
+                            </select>
+                          </label>
+                          <label className="text-sm mt-2">Override title (optional)
+                            <input value={scheduleForm.title} onChange={e=>setScheduleForm({...scheduleForm, title: e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                          </label>
+                          <label className="text-sm mt-2">Override description (optional)
+                            <input value={scheduleForm.description} onChange={e=>setScheduleForm({...scheduleForm, description: e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                          </label>
+                          <div className="flex items-center gap-2 mt-2">
+                            <label className="flex items-center gap-2"><input type="checkbox" checked={!!scheduleForm.dailyReminder} onChange={e=>setScheduleForm({...scheduleForm, dailyReminder: e.target.checked})} /> Daily reminder</label>
+                          </div>
+                          <div className="mt-3 flex gap-2">
+                            <button onClick={createActivityForPatientFromTemplate} className="bg-indigo-600 px-3 py-2 rounded text-white">Create from template</button>
+                            <button onClick={()=>setShowAddActivity(false)} className="bg-gray-700 px-3 py-2 rounded">Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-2">
+                          <label className="text-sm">Title
+                            <input value={scheduleForm.title} onChange={e=>setScheduleForm({...scheduleForm, title: e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                          </label>
+                          <label className="text-sm mt-2">Description
+                            <input value={scheduleForm.description} onChange={e=>setScheduleForm({...scheduleForm, description: e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                          </label>
+                          <label className="text-sm mt-2">Type
+                            <select value={scheduleForm.assignmentType} onChange={e=>setScheduleForm({...scheduleForm, assignmentType: e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1"><option value="exercise">Exercise</option><option value="game">Game</option></select>
+                          </label>
+                          <div className="flex items-center gap-2 mt-2">
+                            <label className="flex items-center gap-2"><input type="checkbox" checked={!!scheduleForm.dailyReminder} onChange={e=>setScheduleForm({...scheduleForm, dailyReminder: e.target.checked})} /> Daily reminder</label>
+                          </div>
+                          <div className="mt-3 flex gap-2">
+                            <button onClick={createCustomActivityForPatient} className="bg-indigo-600 px-3 py-2 rounded text-white">Create custom activity</button>
+                            <button onClick={()=>setShowAddActivity(false)} className="bg-gray-700 px-3 py-2 rounded">Cancel</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
   };
 
   const patientName = (id) => patients.find((p) => p._id === id)?.name || 'selected patient';
@@ -144,56 +309,55 @@ export default function Exercises() {
     return names.join(', ');
   };
 
-  const toggleAssignPatient = (id) => {
-    setAssignForm((prev) => {
-      const next = new Set(prev.selectedPatients);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return { ...prev, selectedPatients: next };
-    });
-  };
+  // Schedule helpers for therapist viewing/adding activities per patient
+  const [showAddActivity, setShowAddActivity] = useState(false);
+  const [scheduleForm, setScheduleForm] = useState({ mode: 'template', templateId: '', title: '', description: '', dueAt: '', dailyReminder: false, assignmentType: 'exercise' });
 
-  const submitAssignment = async () => {
-    if (!assignForm.templateId) return push('Select a template', 'error');
-    if (assignForm.selectedPatients.size === 0) return push('Select at least one patient', 'error');
+  const createActivityForPatientFromTemplate = async () => {
+    if (!selectedPatientId) return push('Select a patient', 'error');
+    if (!scheduleForm.templateId) return push('Select a template', 'error');
+    if (scheduleForm.dueAt) {
+      const d = new Date(scheduleForm.dueAt);
+      const today = new Date(); today.setHours(0,0,0,0);
+      if (d < today) return push('Cannot schedule on a past date', 'error');
+    }
     try {
-      const body = {
-        assignedTo: Array.from(assignForm.selectedPatients),
-        overrides: {
-          title: assignForm.title || undefined,
-          description: assignForm.description || undefined,
-          metadata: {
-            assignmentType: assignForm.type,
-            gameType: assignForm.type === 'game' ? assignForm.gameType : undefined
-          }
-        },
-        dueAt: assignForm.dueAt || undefined,
-        dailyReminder: assignForm.dailyReminder
-      };
-      const res = await authFetch(`http://localhost:5000/api/templates/${assignForm.templateId}/instantiate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
+      const body = { assignedTo: [selectedPatientId], overrides: { title: scheduleForm.title || undefined, description: scheduleForm.description || undefined }, dueAt: scheduleForm.dueAt || undefined, dailyReminder: !!scheduleForm.dailyReminder };
+      const res = await authFetch(`http://localhost:5000/api/templates/${scheduleForm.templateId}/instantiate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json();
       if (data.success) {
-        push('Assignment created', 'success');
-        setAssignForm({
-          ...assignForm,
-          selectedPatients: new Set(),
-          title: '',
-          description: '',
-          dueAt: '',
-          dailyReminder: false
-        });
+        push('Scheduled activity created', 'success');
+        setShowAddActivity(false);
         fetchExercises();
       } else {
-        push(data.error || 'Failed to assign', 'error');
+        push(data.error || 'Failed to create scheduled activity', 'error');
       }
-    } catch (e) {
-      console.error('assign error', e);
-      push('Failed to assign', 'error');
-    }
+    } catch (e) { console.error(e); push('Failed to create scheduled activity', 'error'); }
   };
+
+  const createCustomActivityForPatient = async () => {
+    if (!selectedPatientId) return push('Select a patient', 'error');
+    if (!scheduleForm.title || scheduleForm.title.length < 3) return push('Provide a title', 'error');
+    if (scheduleForm.dueAt) {
+      const d = new Date(scheduleForm.dueAt);
+      const today = new Date(); today.setHours(0,0,0,0);
+      if (d < today) return push('Cannot schedule on a past date', 'error');
+    }
+    try {
+      const body = { title: scheduleForm.title, description: scheduleForm.description, assignedTo: [selectedPatientId], dueAt: scheduleForm.dueAt || undefined, dailyReminder: !!scheduleForm.dailyReminder, metadata: { assignmentType: scheduleForm.assignmentType } };
+      const res = await authFetch('http://localhost:5000/api/exercises', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (data.success) {
+        push('Scheduled custom activity created', 'success');
+        setShowAddActivity(false);
+        fetchExercises();
+      } else {
+        push(data.error || 'Failed to create activity', 'error');
+      }
+    } catch (e) { console.error(e); push('Failed to create activity', 'error'); }
+  };
+
+  
 
   // Therapist view: assign and manage exercises/games
   if (user?.role === 'therapist') {
@@ -211,49 +375,111 @@ export default function Exercises() {
               </div>
               <Link to="/templates" className="bg-gray-700 text-white px-3 py-2 rounded">Manage templates</Link>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <label className="text-sm">
-                Template
-                <select
-                  value={assignForm.templateId}
-                  onChange={(e)=>setAssignForm({...assignForm, templateId: e.target.value})}
-                  className="w-full p-2 bg-gray-700 rounded mt-1"
-                >
-                  <option value="">{templatesLoading ? 'Loading...' : 'Select template'}</option>
-                  {templates.map(t => <option key={t._id} value={t._id}>{t.title}</option>)}
-                </select>
-              </label>
+            <label className="text-sm">
+              Template
+              <select
+                value={assign.templateId}
+                onChange={(e)=>{
+                  const tid = e.target.value;
+                  if (!tid) { setAssign({...assign, templateId: ''}); return; }
+                  const tpl = templates.find(x => String(x._id) === String(tid));
+                  if (!tpl) { setAssign({...assign, templateId: tid}); return; }
+                  const copyPose = tpl.poseConfig ? JSON.parse(JSON.stringify(tpl.poseConfig)) : {};
+                  setAssign({...assign, templateId: tid, overrides: { ...assign.overrides, title: tpl.title || '', poseConfig: copyPose }});
+                }}
+                className="w-full p-2 bg-gray-700 rounded mt-1"
+              >
+                <option value="">{templatesLoading ? 'Loading...' : 'Select template'}</option>
+                {templates.map(t => <option key={t._id} value={t._id}>{t.title}</option>)}
+              </select>
+            </label>
+            <div className="mt-2 text-xs text-gray-400">
+              <div className="font-semibold text-sm text-gray-200 mb-1">Templates preview</div>
+              {templates.length === 0 ? <div>No templates loaded.</div> : (
+                <ul className="space-y-1 max-h-28 overflow-auto">
+                  {templates.map(t => (
+                    <li key={t._id} className="text-sm bg-gray-800 p-1 rounded">
+                      <div className="font-medium">{t.title}</div>
+                      <div className="text-xs text-gray-400">{t.metadata?.vulnerabilityTags && t.metadata.vulnerabilityTags.length ? `Tags: ${Array.isArray(t.metadata.vulnerabilityTags) ? t.metadata.vulnerabilityTags.join(', ') : t.metadata.vulnerabilityTags}` : 'No tags'}</div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
               <label className="text-sm">
                 Assignment title (optional)
-                <input value={assignForm.title} onChange={(e)=>setAssignForm({...assignForm, title:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                <input value={assign.overrides.title} onChange={(e)=>setAssign({...assign, overrides:{...assign.overrides, title:e.target.value}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
               </label>
               <label className="text-sm">
                 Description (optional)
-                <input value={assignForm.description} onChange={(e)=>setAssignForm({...assignForm, description:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                <input value={assign.overrides.description} onChange={(e)=>setAssign({...assign, overrides:{...assign.overrides, description:e.target.value}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
               </label>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
               <label className="text-sm">
-                Type
-                <select value={assignForm.type} onChange={(e)=>setAssignForm({...assignForm, type:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1">
-                  <option value="exercise">Physical exercise</option>
-                  <option value="game">Cognitive game</option>
+                Joint override
+                <select value={assign.overrides.poseConfig?.joints || ''} onChange={(e)=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, joints:e.target.value}}})} className="w-full p-2 bg-gray-700 rounded mt-1">
+                  <option value="">(keep)</option>
+                  <option value="arm">Arm</option>
+                  <option value="knee">Knee</option>
+                  <option value="shoulder">Shoulder</option>
                 </select>
               </label>
-              {assignForm.type === 'game' && (
-                <label className="text-sm">
-                  Game
-                  <select value={assignForm.gameType} onChange={(e)=>setAssignForm({...assignForm, gameType:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1">
-                    <option value="memory">Memory</option>
-                    <option value="stroop">Stroop</option>
-                  </select>
-                </label>
-              )}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
               <label className="text-sm">
-                Due date/time
-                <input type="datetime-local" value={assignForm.dueAt} onChange={(e)=>setAssignForm({...assignForm, dueAt:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                Up angle
+                <input type="number" value={assign.overrides.poseConfig?.upAngle ?? ''} onChange={(e)=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, upAngle: e.target.value === '' ? '' : Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
               </label>
-              <label className="text-sm flex items-center gap-2 mt-6">
-                <input type="checkbox" checked={assignForm.dailyReminder} onChange={(e)=>setAssignForm({...assignForm, dailyReminder:e.target.checked})} />
-                Daily reminder until completed
+              <label className="text-sm">
+                Down angle
+                <input type="number" value={assign.overrides.poseConfig?.downAngle ?? ''} onChange={(e)=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, downAngle: e.target.value === '' ? '' : Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+              </label>
+              <label className="text-sm">
+                Smoothing
+                <input type="number" step="0.01" value={assign.overrides.poseConfig?.smoothing ?? ''} onChange={(e)=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, smoothing: e.target.value === '' ? '' : Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+              </label>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+              <label className="text-sm">
+                Min rep time (ms)
+                <input type="number" value={assign.overrides.poseConfig?.minRepTimeMs ?? ''} onChange={(e)=>setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, minRepTimeMs: e.target.value === '' ? '' : Number(e.target.value)}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+              </label>
+              <label className="text-sm">
+                Knee range min
+                <input type="number" value={assign.overrides.poseConfig?.targets?.kneeRange?.[0] ?? ''} onChange={(e)=>{
+                  const targets = { ...(assign.overrides.poseConfig?.targets || {}) };
+                  const cur = Array.isArray(targets.kneeRange) ? [...targets.kneeRange] : [null, null];
+                  cur[0] = e.target.value === '' ? '' : Number(e.target.value);
+                  targets.kneeRange = cur;
+                  setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets}}});
+                }} className="w-full p-2 bg-gray-700 rounded mt-1" />
+              </label>
+              <label className="text-sm">
+                Knee range max
+                <input type="number" value={assign.overrides.poseConfig?.targets?.kneeRange?.[1] ?? ''} onChange={(e)=>{
+                  const targets = { ...(assign.overrides.poseConfig?.targets || {}) };
+                  const cur = Array.isArray(targets.kneeRange) ? [...targets.kneeRange] : [null, null];
+                  cur[1] = e.target.value === '' ? '' : Number(e.target.value);
+                  targets.kneeRange = cur;
+                  setAssign({...assign, overrides:{...assign.overrides, poseConfig:{...assign.overrides.poseConfig, targets}}});
+                }} className="w-full p-2 bg-gray-700 rounded mt-1" />
+              </label>
+            </div>
+            <div className="mt-3">
+              <label className="text-sm">
+                Vulnerability tags (comma separated)
+                <input value={assign.overrides.metadata?.vulnerabilityTags || ''} onChange={(e)=>setAssign({...assign, overrides:{...assign.overrides, metadata:{...(assign.overrides.metadata||{}), vulnerabilityTags: e.target.value}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+              </label>
+            </div>
+            <div className="flex items-center gap-3 mt-3">
+              <label className="text-sm flex items-center gap-2">
+                Due date
+                <input type="date" value={assign.dueAt || ''} onChange={(e)=>setAssign({...assign, dueAt: e.target.value})} className="p-2 bg-gray-700 rounded" />
+              </label>
+              <label className="text-sm flex items-center gap-2">
+                <input type="checkbox" checked={!!assign.dailyReminder} onChange={(e)=>setAssign({...assign, dailyReminder: e.target.checked})} /> Daily reminder
               </label>
             </div>
             <div className="mt-3">
@@ -261,7 +487,11 @@ export default function Exercises() {
               <div className="max-h-32 overflow-auto bg-gray-800 p-2 rounded">
                 {patients.map(p => (
                   <label key={p._id} className="flex items-center gap-2 p-1 text-sm">
-                    <input type="checkbox" checked={assignForm.selectedPatients.has(p._id)} onChange={()=>toggleAssignPatient(p._id)} />
+                    <input type="checkbox" checked={assign.assignedTo.has(p._id)} onChange={e=>{
+                      const s = new Set(assign.assignedTo);
+                      if (e.target.checked) s.add(p._id); else s.delete(p._id);
+                      setAssign({ ...assign, assignedTo: s });
+                    }} />
                     <span>{p.name} ({p.email || 'no email'})</span>
                   </label>
                 ))}
@@ -269,8 +499,35 @@ export default function Exercises() {
               </div>
             </div>
             <div className="mt-3 flex gap-2">
-              <button onClick={submitAssignment} className="bg-indigo-600 text-white px-4 py-2 rounded">Assign</button>
+              <button onClick={instantiate} className="bg-indigo-600 text-white px-4 py-2 rounded">Create Assignment</button>
               <button onClick={fetchExercises} className="bg-gray-700 text-white px-3 py-2 rounded">Refresh</button>
+            </div>
+            <div className="mt-4 p-3 bg-gray-900 rounded">
+              <div className="text-sm font-semibold mb-2">Auto-allocate based on vulnerabilities</div>
+              <div className="flex items-center gap-2 mb-2">
+                <input placeholder="Optional tags (comma separated)" value={autoAlloc.vulnerabilities || ''} onChange={e=>setAutoAlloc({...autoAlloc, vulnerabilities: e.target.value})} className="bg-gray-700 p-2 rounded text-sm mr-2" />
+                <select value={autoAlloc.patientId} onChange={e=>setAutoAlloc({...autoAlloc, patientId: e.target.value})} className="bg-gray-700 p-2 rounded text-sm">
+                  <option value="">Select patient</option>
+                  {patients.map(p=> <option key={p._id} value={p._id}>{p.name}</option>)}
+                </select>
+                <button onClick={runAutoAllocate} className="bg-indigo-600 px-3 py-2 rounded text-sm">Auto-allocate</button>
+              </div>
+              {autoAlloc.status && <div className="text-xs text-gray-300">{autoAlloc.status}</div>}
+              <div className="text-[11px] text-gray-400">Uses patient vulnerability tags and template vulnerability tags to assign up to 3 best matches.</div>
+              {lastMatches && lastMatches.length > 0 && (
+                <div className="mt-3 p-2 bg-gray-800 rounded">
+                  <div className="font-semibold text-sm mb-1">Last auto-allocate matches</div>
+                  <ul className="space-y-1 text-sm">
+                    {lastMatches.map((m) => (
+                      <li key={m.templateId} className="p-2 bg-gray-900 rounded">
+                        <div className="font-medium">{m.title}</div>
+                        <div className="text-xs text-gray-400">Score: {m.matchScore}</div>
+                        <div className="text-xs text-gray-400">Matched tags: {(m.matchedVulnerabilities || []).join(', ') || '—'}</div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </section>
 
@@ -335,9 +592,9 @@ export default function Exercises() {
           </div>
           <div>
             <h2 className="text-lg font-semibold mb-2">Existing assignments</h2>
-            {loading ? <p>Loading...</p> : exercises.length === 0 ? <p className="text-gray-400">No assignments yet.</p> : (
+            {loading ? <p>Loading...</p> : filteredExercises.length === 0 ? <p className="text-gray-400">No assignments yet.</p> : (
               <ul className="space-y-2">
-                {exercises.map((ex) => (
+                {filteredExercises.map((ex) => (
                   <li key={ex._id} className="p-2 bg-gray-900 rounded">
                     <div className="font-medium">{ex.title}</div>
                     <div className="text-xs text-gray-400">{ex.description}</div>
@@ -358,11 +615,11 @@ export default function Exercises() {
       <div className="max-w-3xl mx-auto bg-gray-800 p-6 rounded shadow">
         <h1 className="text-2xl font-bold mb-2">Exercises</h1>
         <p className="text-gray-300 mb-4">Exercises assigned to you by your therapist. Complete them and your progress will be tracked here.</p>
-        {loading ? <p>Loading...</p> : exercises.length === 0 ? (
+        {loading ? <p>Loading...</p> : filteredExercises.length === 0 ? (
           <p className="text-gray-400">No exercises assigned yet.</p>
         ) : (
           <ul className="space-y-3">
-            {exercises.map((ex) => (
+            {filteredExercises.map((ex) => (
               <li key={ex._id} className="p-3 bg-gray-900 rounded">
                 <div className="flex justify-between items-center">
                   <div>

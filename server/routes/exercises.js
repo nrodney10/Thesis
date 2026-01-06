@@ -52,20 +52,35 @@ router.post('/', verifyToken, async (req, res) => {
     })();
     if (!title || typeof title !== 'string' || title.length < 3) return res.status(400).json({ success: false, error: 'Title is required (min 3 chars)' });
 
-    // validate assignedTo are existing users
+    // validate assignedTo are existing users and that each patient has this therapist
     const validAssigned = [];
+    const invalid = [];
     for (const id of assignedTo) {
       const u = await User.findById(id);
-      if (u) validAssigned.push(u._id);
+      if (!u || u.role !== 'patient') { invalid.push(id); continue; }
+      if (String(u.therapistId) !== String(req.user.id)) { invalid.push(id); continue; }
+      validAssigned.push(u._id);
     }
+    if (invalid.length) return res.status(400).json({ success:false, error:'Some assignees are invalid or not assigned to you', invalid });
 
-    const ex = new Exercise({ title, description, assignedTo: validAssigned, metadata, poseConfig, createdBy: req.user.id, dueAt: dueAt ? new Date(dueAt) : undefined, dailyReminder: !!dailyReminder });
+    const meta = { ...(metadata || {}) };
+    if (!meta.assignmentType) meta.assignmentType = 'exercise';
+
+    const ex = new Exercise({ title, description, assignedTo: validAssigned, metadata: meta, poseConfig, createdBy: req.user.id, dueAt: dueAt ? new Date(dueAt) : undefined, dailyReminder: !!dailyReminder });
     await ex.save();
 
     // notify assigned users (non-blocking)
     if (validAssigned.length) {
-      notifyUsers(validAssigned, `A new exercise has been assigned: ${title}`, `Your therapist assigned a new exercise: ${title}`)
-        .catch((e) => console.error('Notification error', e));
+      const label = meta.assignmentType === 'game' ? 'game' : 'exercise';
+      notifyUsers(validAssigned, `A new ${label} has been assigned: ${title}`, `Your therapist assigned a new ${label}: ${title}`)
+        .catch((e) => console.error('Notification email error', e));
+      for (const uid of validAssigned) {
+        try {
+          await createNotification(uid, `New ${label} assigned`, `Your therapist assigned: ${title}`, { exerciseId: ex._id, assignmentType: meta.assignmentType });
+        } catch (e) {
+          console.error('Notification create error', e.message);
+        }
+      }
     }
 
     res.json({ success: true, exercise: ex });
@@ -186,4 +201,44 @@ router.post('/run-reminders', verifyToken, async (req, res) => {
     }
     res.json({ success:true, dueCount: dueExercises.length });
   } catch (e) { console.error('run reminders error', e); res.status(500).json({ success:false }); }
+});
+
+// Update an exercise (therapist only, must be creator)
+router.put('/:id', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
+    const { id } = req.params;
+    const ex = await Exercise.findById(id);
+    if (!ex) return res.status(404).json({ success: false, error: 'Exercise not found' });
+    if (String(ex.createdBy) !== String(req.user.id)) return res.status(403).json({ success: false, error: 'Not allowed' });
+
+    const { title, description, dueAt, dailyReminder } = req.body || {};
+    if (title && typeof title === 'string') ex.title = title;
+    if (description && typeof description === 'string') ex.description = description;
+    if (typeof dailyReminder !== 'undefined') ex.dailyReminder = !!dailyReminder;
+    if (dueAt) ex.dueAt = new Date(dueAt);
+    else if (dueAt === null) ex.dueAt = undefined;
+
+    await ex.save();
+    res.json({ success: true, exercise: ex });
+  } catch (e) {
+    console.error('PUT /api/exercises/:id', e);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// Delete an exercise (therapist only, must be creator)
+router.delete('/:id', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
+    const { id } = req.params;
+    const ex = await Exercise.findById(id);
+    if (!ex) return res.status(404).json({ success: false, error: 'Exercise not found' });
+    if (String(ex.createdBy) !== String(req.user.id)) return res.status(403).json({ success: false, error: 'Not allowed' });
+    await ex.deleteOne();
+    res.json({ success: true });
+  } catch (e) {
+    console.error('DELETE /api/exercises/:id', e);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
 });

@@ -400,7 +400,7 @@ router.post('/me/disconnect', verifyToken, async (req, res) => {
   }
 });
 
-// Convenience: reset then redirect to connect in one step
+
 router.get('/reset-and-connect', verifyToken, async (req, res) => {
   try {
     await User.findByIdAndUpdate(req.user.id, { $unset: {

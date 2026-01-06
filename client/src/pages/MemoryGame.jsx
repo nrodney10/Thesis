@@ -12,12 +12,14 @@ function shuffle(array) {
 }
 
 const EMOJIS = [
-  "🧠","🧩","🎯","🕹️","🧮","🧪","🎲","🔔","⭐","🌟","🍀","🍎","🐶","🐱","🚀","🌈"
+  "🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼",
+  "🐨","🐯","🦁","🐮","🐷","🐸","🐵","🐔"
 ];
 
-export default function MemoryGame() {
+export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "memory", onFinished }) {
   const navigate = useNavigate();
   const { authFetch } = useAuth();
+  const { push } = useToast();
 
   const [difficulty, setDifficulty] = useState("easy");
   const pairsByDifficulty = { easy: 4, medium: 6, hard: 8 };
@@ -69,10 +71,8 @@ export default function MemoryGame() {
 
   useEffect(() => {
     if (matchedCount === totalPairs && totalPairs > 0) {
-      // finished
       if (intervalRef.current) clearInterval(intervalRef.current);
     }
-    // safe: only depends on matchedCount/totalPairs
   }, [matchedCount, totalPairs]);
 
   const handleFlip = (card) => {
@@ -84,20 +84,17 @@ export default function MemoryGame() {
       setMoves((m) => m + 1);
       const [a, b] = newFlipped;
       if (a.value === b.value) {
-        // mark matched
         setCards((prev) => prev.map((c) => (c.value === a.value ? { ...c, matched: true } : c)));
         setMatchedCount((mc) => mc + 1);
         setFlipped([]);
       } else {
-        // flip back after short delay
         setTimeout(() => setFlipped([]), 700);
       }
     }
   };
-  // keyboard support: arrow keys navigate, Enter flips
+
   const allMatched = matchedCount === totalPairs && totalPairs > 0;
 
-  // keyboard support: arrow keys navigate, Enter flips
   useEffect(() => {
     const onKey = (e) => {
       if (allMatched) return;
@@ -107,7 +104,6 @@ export default function MemoryGame() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cards, focusedIndex, allMatched, flipped]);
 
   const restart = () => {
@@ -125,22 +121,20 @@ export default function MemoryGame() {
   };
 
   const computeScore = () => {
-    const timePenalty = time; // seconds
+    const timePenalty = time;
     const movePenalty = moves * 2;
     const base = 100;
     let score = Math.max(5, Math.round(base - timePenalty - movePenalty));
     return score;
   };
 
-  const { push } = useToast();
-
   const submitResult = async () => {
     const score = computeScore();
     const payload = {
-      exerciseId: `memory-match-${difficulty}`,
+      exerciseId: assignmentId || `memory-match-${difficulty}`,
       type: "cognitive",
       score,
-      metadata: { difficulty, moves, timeSeconds: time },
+      metadata: { difficulty, moves, timeSeconds: time, gameKey },
     };
 
     try {
@@ -152,7 +146,8 @@ export default function MemoryGame() {
       const data = await res.json();
       if (data.success) {
         push("Result submitted! Score: " + score, 'success');
-        navigate('/patient');
+        if (onFinished) onFinished();
+        else navigate('/patient');
       } else {
         push('Failed to submit result', 'error');
       }
@@ -163,23 +158,22 @@ export default function MemoryGame() {
   };
 
   return (
-    <div className="min-h-screen flex items-start justify-center bg-gray-900 p-8 text-white">
+    <div className="min-h-screen flex items-start justify-center bg-gray-50 p-8 text-gray-900">
       <div className="w-full max-w-3xl">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-bold">Memory Match</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{assignmentTitle || 'Memory Match'}</h1>
           <div className="flex items-center gap-3">
-            <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="bg-gray-800 text-white px-3 py-2 rounded">
+            <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="bg-white border text-gray-900 px-3 py-2 rounded">
               <option value="easy">Easy (4 pairs)</option>
               <option value="medium">Medium (6 pairs)</option>
               <option value="hard">Hard (8 pairs)</option>
             </select>
-            <button onClick={restart} className="bg-indigo-600 px-3 py-2 rounded">Restart</button>
+            <button onClick={restart} className="bg-indigo-600 text-white px-3 py-2 rounded">Restart</button>
           </div>
         </div>
+        <div className="mb-4 text-sm text-gray-700">Moves: {moves} • Time: {time}s</div>
 
-        <div className="mb-4 text-sm text-gray-300">Moves: {moves} • Time: {time}s</div>
-
-        <div className={`grid gap-3 ${totalPairs<=4 ? 'grid-cols-4' : totalPairs<=6 ? 'grid-cols-6' : 'grid-cols-8'}`}>
+        <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
           {cards.map((card, idx) => {
             const isFlipped = !!flipped.find((f) => f.id === card.id) || card.matched;
             const isFocused = focusedIndex === idx;
@@ -188,10 +182,10 @@ export default function MemoryGame() {
                 key={card.id}
                 onClick={() => handleFlip(card)}
                 tabIndex={0}
-                className={`w-16 h-16 md:w-20 md:h-20 flex items-center justify-center rounded cursor-pointer select-none text-2xl md:text-3xl ${isFlipped ? 'bg-indigo-500' : 'bg-gray-800 hover:bg-gray-700'} ${isFocused ? 'ring-2 ring-indigo-400' : ''}`}
+                className="w-16 h-16 md:w-20 md:h-20 flex items-center justify-center rounded cursor-pointer select-none text-2xl md:text-3xl bg-white text-gray-900 border shadow-sm"
                 onFocus={() => setFocusedIndex(idx)}
               >
-                {isFlipped ? card.value : '❓'}
+                {isFlipped ? card.value : '?'}
               </div>
             );
           })}
@@ -199,12 +193,12 @@ export default function MemoryGame() {
 
         <div className="mt-6">
           {allMatched ? (
-            <div className="bg-gray-800 p-4 rounded">
-              <div className="text-lg">Finished! Score: {computeScore()}</div>
+            <div className="bg-white p-4 rounded border">
+              <div className="text-lg text-gray-900">Finished! Score: {computeScore()}</div>
               <div className="mt-3 flex gap-2">
-                <button onClick={submitResult} className="bg-green-600 px-3 py-2 rounded">Submit Result</button>
-                <button onClick={restart} className="bg-indigo-600 px-3 py-2 rounded">Play Again</button>
-                <button onClick={() => navigate('/patient')} className="bg-gray-600 px-3 py-2 rounded">Back</button>
+                <button onClick={submitResult} className="bg-green-600 text-white px-3 py-2 rounded">Submit Result</button>
+                <button onClick={restart} className="bg-indigo-600 text-white px-3 py-2 rounded">Play Again</button>
+                <button onClick={() => navigate('/patient')} className="bg-gray-600 text-white px-3 py-2 rounded">Back</button>
               </div>
             </div>
           ) : null}
@@ -213,3 +207,5 @@ export default function MemoryGame() {
     </div>
   );
 }
+
+

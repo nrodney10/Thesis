@@ -13,6 +13,11 @@ export default function PatientDashboard() {
   const [fallbackHR, setFallbackHR] = useState(null); // last available from prior days
   const [heartRateSource, setHeartRateSource] = useState(null); // live | summary | cached
   const [fitbitStatus, setFitbitStatus] = useState('checking'); // checking | connected | not-connected | error
+  const [therapists, setTherapists] = useState([]);
+  const [selectedTherapist, setSelectedTherapist] = useState('');
+  const [therapistRequestStatus, setTherapistRequestStatus] = useState('');
+  const [currentTherapistName, setCurrentTherapistName] = useState('');
+  const maxTrendPoints = 20;
 
   const fetchResults = async () => {
     setLoading(true);
@@ -29,8 +34,24 @@ export default function PatientDashboard() {
 
   useEffect(() => {
     fetchResults();
+    fetchTherapists();
+    if (user?.therapistId) {
+      (async () => {
+        try {
+          const r = await authFetch(`/api/user/therapists`);
+        } catch (_) {}
+      })();
+    }
     // Poll heart rate every 20s
     let t;
+    // Fetch therapist name if available
+    if (user?.therapistId && therapists.length) {
+      const t = therapists.find(x => String(x._id) === String(user.therapistId));
+      if (t) setCurrentTherapistName(t.name);
+      else setCurrentTherapistName('');
+    } else {
+      setCurrentTherapistName('');
+    }
     const poll = async () => {
       try {
         // First check connection status
@@ -80,8 +101,95 @@ export default function PatientDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const fetchTherapists = async () => {
+    try {
+      const res = await authFetch('http://localhost:5000/api/patients/therapists');
+      const j = await res.json();
+      if (j.success) setTherapists(j.therapists || []);
+    } catch (e) { console.error('fetch therapists', e); }
+  };
+
   const displayBpm = heartRate ?? fallbackHR?.bpm ?? '--';
   const isStale = (heartRateSource && heartRateSource.includes('cached')) || (heartRateSource || '').startsWith('summary') || (!heartRate && !!fallbackHR);
+
+  const buildTrend = (allResults, types = [], limit = 20) => {
+    const filtered = Array.isArray(allResults)
+      ? allResults.filter(r => types.includes((r.type || '').toLowerCase()) && typeof r.score === 'number')
+      : [];
+    const slice = filtered.slice(0, limit).reverse(); // oldest to newest
+    if (!slice.length) return [];
+    return slice.map((r, idx) => {
+      const x = (idx / Math.max(1, slice.length - 1)) * 100;
+      const score = Math.min(100, Math.max(0, r.score));
+      const d = r.createdAt ? new Date(r.createdAt) : null;
+      const label = d ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : (r.title || r.type || 'Result');
+      return { x, score, label };
+    });
+  };
+
+  const TrendCard = ({ label, color, points }) => {
+    const ticks = [0, 25, 50, 75, 100];
+    const idSafe = label.replace(/\s+/g, '-').toLowerCase();
+    const xLabels = points.length >= 3
+      ? [points[0].label, points[Math.floor(points.length / 2)].label, points[points.length - 1].label]
+      : points.map(p => p.label);
+    const chartHeight = 60;
+    const toY = (score) => chartHeight - (score / 100) * chartHeight;
+    return (
+      <div className="bg-gray-900 rounded p-3 border border-gray-700">
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-sm text-gray-300">{label}</div>
+          <div className="text-[11px] text-gray-400">{points.length ? `${points.length} pts` : 'No data'}</div>
+        </div>
+        <div className="w-full h-32">
+          {points.length ? (
+            <svg viewBox="0 0 110 80" preserveAspectRatio="none" className="w-full h-full">
+              <defs>
+                <linearGradient id={`grad-${idSafe}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={color} stopOpacity="0.15" />
+                  <stop offset="100%" stopColor={color} stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              {/* Grid */}
+              {ticks.map(t => {
+                const y = toY(t);
+                return <line key={t} x1="0" y1={y} x2="100" y2={y} stroke="#374151" strokeWidth="0.3" />;
+              })}
+              {/* Axis labels (Y) */}
+              {ticks.map(t => {
+                const y = toY(t);
+                return <text key={`y-${t}`} x="104" y={y + 2} fontSize="4" fill="#9CA3AF" textAnchor="start">{t}</text>;
+              })}
+              {/* Area & Line */}
+              <polygon
+                fill={`url(#grad-${idSafe})`}
+                points={`${points.map(p=>`${p.x},${toY(p.score)}`).join(' ')} 100,${chartHeight} 0,${chartHeight}`}
+              />
+              <polyline
+                fill="none"
+                stroke={color}
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                points={points.map(p => `${p.x},${toY(p.score)}`).join(' ')}
+              />
+              {/* Dots */}
+              {points.map((p, i) => (
+                <circle key={i} cx={p.x} cy={toY(p.score)} r="1.2" fill={color} />
+              ))}
+              {/* X labels (first, middle, last) */}
+              {xLabels.map((lbl, idx) => {
+                const px = idx === 0 ? 0 : idx === 1 ? 50 : 100;
+                return <text key={`x-${idx}`} x={px} y="78" fontSize="4" fill="#9CA3AF" textAnchor={idx === 0 ? 'start' : idx === 1 ? 'middle' : 'end'}>{lbl}</text>;
+              })}
+            </svg>
+          ) : (
+            <div className="text-xs text-gray-500">No data yet -- complete an activity to populate this chart.</div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen p-8 bg-gray-900 text-gray-100">
@@ -123,13 +231,13 @@ export default function PatientDashboard() {
                 </div>
               </div>
 
-              <p className="mb-4 text-gray-300">Welcome — here's a quick snapshot of your recent progress.</p>
+              <p className="mb-4 text-gray-300">Welcome -- here's a quick snapshot of your recent progress.</p>
 
               <div className="mb-4 flex flex-col md:flex-row md:items-start md:gap-4">
                 <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-3 mb-3 md:mb-0">
                   <div className="p-4 bg-gradient-to-br from-indigo-600 to-purple-600 rounded shadow">
                     <div className="text-xs text-white/80">Last score</div>
-                    <div className="text-2xl font-bold mt-1 text-white">{results[0]?.score ?? '—'}</div>
+                    <div className="text-2xl font-bold mt-1 text-white">{results[0]?.score ?? '--'}</div>
                     <div className="text-xs text-white/70 mt-1">{results[0] ? new Date(results[0].createdAt).toLocaleDateString() : ''}</div>
                   </div>
                   <div className="p-4 bg-gray-800 rounded shadow">
@@ -182,25 +290,33 @@ export default function PatientDashboard() {
                   </div>
                 </div>
 
-                <div className="flex-1 bg-gray-800 rounded p-3 shadow">
-                  <div className="text-sm text-gray-300">Recent trend</div>
-                  <div className="mt-2 w-full h-20">
-                    {results.length ? (
-                      <svg viewBox="0 0 100 20" preserveAspectRatio="none" className="w-full h-full">
-                        <polyline
-                          fill="none"
-                          stroke="#7c3aed"
-                          strokeWidth="1.5"
-                          points={results.slice(0, 30).map((r, i) => {
-                            const x = (i / Math.max(1, Math.min(29, results.length - 1))) * 100;
-                            const y = 20 - Math.min(20, ((r.score || 0) / 100) * 20);
-                            return `${x},${y}`;
-                          }).join(' ')}
-                        />
-                      </svg>
-                    ) : (
-                      <div className="text-xs text-gray-500">No data yet — play some games or complete exercises to populate this chart.</div>
-                    )}
+                <div className="flex-1 bg-gray-800 rounded p-3 shadow space-y-3">
+                  <div className="text-sm text-gray-300">Recent trends</div>
+                  <TrendCard label="Exercise scores" color="#7c3aed" points={buildTrend(results, ['exercise','physical'], maxTrendPoints)} />
+                  <TrendCard label="Cognitive game scores" color="#22c55e" points={buildTrend(results, ['game','cognitive'], maxTrendPoints)} />
+                  <div className="mt-3 p-3 bg-gray-900 rounded">
+                    <div className="text-sm text-gray-300 mb-2">Therapist</div>
+                    <div className="text-sm text-gray-200">{user?.therapistId ? (user.therapistName || 'Assigned therapist') : 'No therapist assigned'}</div>
+                      <div className="text-sm text-gray-200">{currentTherapistName || 'No therapist assigned'}</div>
+                    <div className="mt-3">
+                      <select className="bg-gray-800 text-sm p-2 rounded w-full" value={selectedTherapist} onChange={(e)=>setSelectedTherapist(e.target.value)}>
+                        <option value="">Select a therapist to request</option>
+                        {therapists.map(t => <option key={t._id} value={t._id}>{t.name} — {t.email}</option>)}
+                      </select>
+                      <div className="mt-2 flex gap-2">
+                        <button className="px-3 py-2 bg-green-600 rounded text-sm" onClick={async ()=>{
+                          if (!selectedTherapist) return setTherapistRequestStatus('Pick a therapist');
+                          setTherapistRequestStatus('Sending request...');
+                          try {
+                            const r = await authFetch(`http://localhost:5000/api/patients/therapists/${selectedTherapist}/request`, { method: 'POST' });
+                            const j = await r.json();
+                            if (j.success) setTherapistRequestStatus('Request sent'); else setTherapistRequestStatus(j.message || 'Failed');
+                          } catch (e) { setTherapistRequestStatus('Error sending request'); }
+                        }}>Request</button>
+                        <button className="px-3 py-2 bg-gray-700 rounded text-sm" onClick={()=>{ setSelectedTherapist(''); setTherapistRequestStatus(''); }}>Clear</button>
+                      </div>
+                      {therapistRequestStatus && <div className="text-xs text-gray-400 mt-2">{therapistRequestStatus}</div>}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -227,7 +343,7 @@ export default function PatientDashboard() {
                               <div className="text-xs text-gray-400">{new Date(r.createdAt).toLocaleString()}</div>
                             </div>
                             <div className="flex items-center gap-3">
-                              <div className="text-sm font-semibold text-white">{r.score ?? '—'}</div>
+                              <div className="text-sm font-semibold text-white">{r.score ?? '--'}</div>
                               <button
                                 onClick={() => {
                                   const s = new Set(expandedIds);
@@ -249,7 +365,7 @@ export default function PatientDashboard() {
                               {r.metadata?.poseMetrics && (
                                 <div className="text-sm text-gray-300">
                                   <div>Reps: {r.metadata.poseMetrics.reps ?? 0}</div>
-                                  <div>Avg angle: {r.metadata.poseMetrics.avgAngle ? Math.round(r.metadata.poseMetrics.avgAngle) + '°' : '—'}</div>
+                                  <div>Avg angle: {r.metadata.poseMetrics.avgAngle ? Math.round(r.metadata.poseMetrics.avgAngle) + ' deg' : '—'}</div>
                                   <div>Cadence: {r.metadata.poseMetrics.cadence ? Math.round(r.metadata.poseMetrics.cadence) + '/min' : '—'}</div>
                                   {r.metadata.poseMetrics.quality && (
                                     <div>Quality: {Array.isArray(r.metadata.poseMetrics.quality) ? r.metadata.poseMetrics.quality.join(', ') : String(r.metadata.poseMetrics.quality)}</div>
@@ -292,3 +408,9 @@ export default function PatientDashboard() {
     </div>
   );
 }
+
+
+
+
+
+

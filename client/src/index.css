@@ -83,3 +83,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 
 
 /* Card rounding for common containers */
 .rounded, .rounded-lg, .rounded-xl { border-radius: 1rem !important; }
+
+/* Ensure components that still use `text-white` remain visible on light theme */
+/* This targets class names that include `text-white` (including opacity variants) */
+[class*="text-white"] {
+  color: var(--text-strong) !important;
+}

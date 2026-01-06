@@ -7,9 +7,8 @@ import PatientDashboard from "./pages/PatientDashboard";
 import TherapistDashboard from "./pages/TherapistDashboard";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
-import MemoryGame from "./pages/MemoryGame";
-import StroopGame from "./pages/StroopGame";
 import Games from "./pages/Games";
+import GamePlayer from "./pages/GamePlayer";
 import Exercises from "./pages/Exercises";
 import Reports from "./pages/Reports";
 import Messages from "./pages/Messages";
@@ -22,6 +21,8 @@ import TherapistReports from "./pages/TherapistReports";
 import TherapistNotifications from "./pages/TherapistNotifications";
 import PatientCalendar from "./pages/PatientCalendar";
 import TherapistCalendar from "./pages/TherapistCalendar";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 
 function App() {
   return (
@@ -31,6 +32,8 @@ function App() {
           <Route path="/" element={<Register />} />
           <Route path="/register" element={<Register />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/forgot" element={<ForgotPassword />} />
+          <Route path="/reset" element={<ResetPassword />} />
           <Route path="/welcome" element={<WelcomePage />} />
           <Route
             path="/patient"
@@ -40,9 +43,8 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/games/memory" element={<ProtectedRoute requiredRole="patient"><MemoryGame /></ProtectedRoute>} />
-          <Route path="/games/stroop" element={<ProtectedRoute requiredRole="patient"><StroopGame /></ProtectedRoute>} />
           <Route path="/games" element={<ProtectedRoute><Games /></ProtectedRoute>} />
+          <Route path="/games/play/:id" element={<ProtectedRoute requiredRole="patient"><GamePlayer /></ProtectedRoute>} />
           <Route path="/exercises" element={<ProtectedRoute><Exercises /></ProtectedRoute>} />
           <Route path="/exercises/new" element={<ProtectedRoute requiredRole="therapist"><ExerciseNew /></ProtectedRoute>} />
           <Route path="/templates" element={<ProtectedRoute requiredRole="therapist"><Templates /></ProtectedRoute>} />
