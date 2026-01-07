@@ -14,6 +14,7 @@ export default function TherapistDashboard() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [therapistLink, setTherapistLink] = useState({ patientId: '', status: '' });
+  const [removeLink, setRemoveLink] = useState({ patientId: '', status: '' });
   const navigate = useNavigate();
 
   // Mock data used until API endpoints are added
@@ -116,13 +117,35 @@ export default function TherapistDashboard() {
       const res = await authFetch(`http://localhost:5000/api/patients/${therapistLink.patientId}/assign-therapist`, { method:'POST' });
       const data = await res.json();
       if (data.success) {
-        setTherapistLink((s)=>({ ...s, status:'You are assigned as therapist' }));
-      } else {
-        setTherapistLink((s)=>({ ...s, status: data.message || 'Failed to assign' }));
-      }
-    } catch (e) {
+      setTherapistLink((s)=>({ ...s, status:'You are assigned as therapist' }));
+      fetchPatients();
+    } else {
+      setTherapistLink((s)=>({ ...s, status: data.message || 'Failed to assign' }));
+    }
+  } catch (e) {
       console.error('assign therapist', e);
       setTherapistLink((s)=>({ ...s, status:'Error assigning therapist' }));
+    }
+  };
+
+  const removeTherapistFromPatient = async () => {
+    if (!removeLink.patientId) {
+      setRemoveLink((s)=>({ ...s, status:'Pick a patient first' }));
+      return;
+    }
+    setRemoveLink((s)=>({ ...s, status:'Removing...' }));
+    try {
+      const res = await authFetch(`http://localhost:5000/api/patients/${removeLink.patientId}/unassign-therapist`, { method:'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setRemoveLink((s)=>({ ...s, status:'Removed link' }));
+        fetchPatients();
+      } else {
+        setRemoveLink((s)=>({ ...s, status: data.message || 'Failed to remove' }));
+      }
+    } catch (e) {
+      console.error('remove therapist', e);
+      setRemoveLink((s)=>({ ...s, status:'Error removing therapist' }));
     }
   };
 
@@ -309,6 +332,23 @@ export default function TherapistDashboard() {
                   <div className="mt-4 flex gap-2">
                     <button onClick={() => assignExercise(selectedPatient._id)} className="px-3 py-2 bg-indigo-600 rounded">Assign Exercise</button>
                     <button onClick={() => viewResultsForPatient(selectedPatient._id)} className="px-3 py-2 bg-gray-600 rounded">View Results</button>
+                    <button onClick={async ()=>{
+                      if (!selectedPatient || !selectedPatient._id) return;
+                      if (!window.confirm(`Remove ${selectedPatient.name} from your patients? This will unassign the patient.`)) return;
+                      try {
+                        const res = await authFetch(`http://localhost:5000/api/patients/${selectedPatient._id}/unassign-therapist`, { method: 'POST' });
+                        const j = await res.json();
+                        if (j.success) {
+                          push('Patient unassigned', 'success');
+                          // refresh patient list and clear selection
+                          try { const r = await authFetch('http://localhost:5000/api/patients'); const j2 = await r.json(); if (j2.success) setPatients(j2.patients||[]); } catch(_){}
+                          setSelectedPatient(null);
+                          setRecentResults([]);
+                        } else {
+                          push(j.message || 'Failed to unassign', 'error');
+                        }
+                      } catch (e) { console.error('unassign error', e); push('Error unassigning patient', 'error'); }
+                    }} className="px-3 py-2 bg-red-600 rounded">Remove patient</button>
                   </div>
                 </div>
               ) : (
@@ -360,6 +400,18 @@ export default function TherapistDashboard() {
               </div>
               {therapistLink.status && <div className="text-xs text-gray-300 mt-1">{therapistLink.status}</div>}
               <div className="text-[11px] text-gray-400 mt-1">Patient will get a request and must accept you as their therapist.</div>
+            </div>
+            <div className="bg-gray-800 rounded-lg p-4 shadow mt-4">
+              <h4 className="text-sm text-gray-300">Remove patient link</h4>
+              <div className="flex items-center gap-2 mt-2">
+                <select value={removeLink.patientId} onChange={e=>setRemoveLink({...removeLink, patientId: e.target.value})} className="bg-gray-700 p-2 rounded text-sm w-full">
+                  <option value="">Select patient</option>
+                  {patients.map(p=> <option key={p._id} value={p._id}>{p.name} — {p.email}</option>)}
+                </select>
+                <button onClick={removeTherapistFromPatient} className="bg-red-600 px-3 py-2 rounded text-sm whitespace-nowrap">Remove</button>
+              </div>
+              {removeLink.status && <div className="text-xs text-gray-300 mt-1">{removeLink.status}</div>}
+              <div className="text-[11px] text-gray-400 mt-1">Removes you as therapist for that patient.</div>
             </div>
           </aside>
         </div>

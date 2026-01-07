@@ -43,12 +43,20 @@ export async function autoAllocateForPatient(patientId, { limit = 3, dueAt = nul
   // Previously we skipped templates already auto-assigned; to keep allocations working even if prior runs exist,
   // we now consider all templates (duplicate assignments are allowed).
   const scored = scoreTemplates(templates, vulnTags);
-  let chosen = scored.filter((s) => s.score > 0).slice(0, Math.max(1, Math.min(10, Number(limit) || 3)));
-  // Fallback: if no positive scores, still take the top template to avoid "no_matches" dead-end
-  if (!chosen.length && scored.length) {
-    chosen = scored.slice(0, Math.max(1, Math.min(10, Number(limit) || 3)));
+  // Avoid duplicating existing assignments for this patient/therapist/template
+  const existing = await Exercise.find({
+    assignedTo: patient._id,
+    createdBy: patient.therapistId,
+    templateId: { $ne: null }
+  }).select('templateId');
+  const existingTplIds = new Set(existing.map((e) => String(e.templateId)));
+
+  const available = scored.filter((s) => !existingTplIds.has(String(s.tpl._id)));
+  const chosen = available.filter((s) => s.score > 0).slice(0, Math.max(1, Math.min(10, Number(limit) || 3)));
+  if (!chosen.length) {
+    if (available.length === 0) return { success: true, count: 0, reason: 'already_assigned' };
+    return { success: false, reason: 'no_matches' };
   }
-  if (!chosen.length) return { success: false, reason: 'no_matches' };
 
   const created = [];
   const matches = [];

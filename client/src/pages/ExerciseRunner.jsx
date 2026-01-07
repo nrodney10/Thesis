@@ -18,6 +18,7 @@ export default function ExerciseRunner() {
   const [includeVideo, setIncludeVideo] = useState(false);
   const [enablePose, setEnablePose] = useState(false);
   const [recordingBlobUrl, setRecordingBlobUrl] = useState(null);
+  const [autoSubmitted, setAutoSubmitted] = useState(false);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -87,6 +88,14 @@ export default function ExerciseRunner() {
     if (timeLeft === 0 && running) setRunning(false);
     return () => clearInterval(t);
   }, [running, timeLeft]);
+
+  // Auto-submit when timer ends
+  useEffect(() => {
+    if (!running && timeLeft === 0 && !autoSubmitted) {
+      setAutoSubmitted(true);
+      submitResult({ completed: true });
+    }
+  }, [running, timeLeft, autoSubmitted]); // submitResult from scope
 
   // Stop media on unmount
   useEffect(() => {
@@ -628,6 +637,7 @@ export default function ExerciseRunner() {
     setTimeLeft(initialTime);
     if (includeVideo) { await startMedia(); try { mediaRecorderRef.current?.start(); } catch (e) { console.warn('recorder start failed', e); } }
     setRunning(true);
+    setAutoSubmitted(false);
     push('Exercise started', 'info');
   };
 

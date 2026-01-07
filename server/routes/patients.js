@@ -141,6 +141,35 @@ router.post('/respond-therapist', verifyToken, async (req, res) => {
   }
 });
 
+// Therapist can remove themselves from a patient
+router.post('/:id/unassign-therapist', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'therapist') return res.status(403).json({ success:false, message:'Forbidden' });
+    const patientId = req.params.id;
+    const patient = await User.findById(patientId);
+    if (!patient || patient.role !== 'patient') return res.status(404).json({ success:false, message:'Patient not found' });
+    if (String(patient.therapistId) !== String(req.user.id)) return res.status(403).json({ success:false, message:'Not assigned to you' });
+
+    patient.therapistId = undefined;
+    patient.pendingTherapistId = undefined;
+    await patient.save();
+    try {
+      const Notification = (await import('../models/Notification.js')).default;
+      await Notification.create({
+        userId: patient._id,
+        title: 'Therapist removed',
+        body: `${req.user.name || 'Therapist'} removed themselves from your care.`,
+        data: { type: 'therapist-removed', therapistId: req.user.id }
+      });
+    } catch (e) { console.warn('notify removal failed', e.message); }
+
+    res.json({ success:true });
+  } catch (e) {
+    console.error('unassign therapist error', e);
+    res.status(500).json({ success:false, message:'Server error' });
+  }
+});
+
 // Therapist responds to patient request (accept/decline)
 router.post('/respond-patient', verifyToken, async (req, res) => {
   try {

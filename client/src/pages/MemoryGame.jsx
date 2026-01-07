@@ -41,6 +41,7 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
   const [matchedCount, setMatchedCount] = useState(0);
   const [startTime, setStartTime] = useState(null);
   const [time, setTime] = useState(0);
+  const [autoSubmitted, setAutoSubmitted] = useState(false);
   const intervalRef = useRef(null);
   const [focusedIndex, setFocusedIndex] = useState(0);
 
@@ -74,6 +75,16 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
       if (intervalRef.current) clearInterval(intervalRef.current);
     }
   }, [matchedCount, totalPairs]);
+
+  // Auto-submit when finished
+  useEffect(() => {
+    if (matchedCount === totalPairs && totalPairs > 0 && !autoSubmitted) {
+      setAutoSubmitted(true);
+      // small delay to allow UI to update
+      const t = setTimeout(() => { submitResult(); }, 700);
+      return () => clearTimeout(t);
+    }
+  }, [matchedCount, totalPairs, autoSubmitted]);
 
   const handleFlip = (card) => {
     if (!startTime) setStartTime(Date.now());

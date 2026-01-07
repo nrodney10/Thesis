@@ -1,0 +1,322 @@
+\documentclass[12pt,a4paper]{report}
+
+% Encoding and language
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+
+% Layout
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{setspace}
+\onehalfspacing
+
+% Graphics, tables, code
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{listings}
+\usepackage{xcolor}
+
+% Hyperlinks
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+
+% Bibliography (choose your backend; biblatex here)
+\usepackage[backend=biber,style=ieee]{biblatex}
+\addbibresource{references.bib}
+
+% Code block style
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  numbers=left,
+  numberstyle=\tiny,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{teal}
+}
+
+% Title data (fill these)
+\newcommand{\ProjectTitle}{<Your Project Title>}
+\newcommand{\AuthorName}{<Your Name>}
+\newcommand{\StudentID}{<Your Student ID>}
+\newcommand{\StudyProgramme}{Biomedical Engineering}
+\newcommand{\Specialization}{Information Systems in Medicine}
+\newcommand{\SupervisorName}{Dr inz. Marcin Rudzki}
+\newcommand{\SupervisorDept}{Department of Medical Informatics and Artificial Intelligence}
+\newcommand{\SupervisorFaculty}{Faculty of Biomedical Engineering}
+\newcommand{\ThesisYear}{2025}
+\newcommand{\LogoPath}{logo.png} % place the provided logo at thesis/logo.png
+
+\begin{document}
+
+\begin{titlepage}
+  \centering
+  \vspace*{0.5cm}
+  \IfFileExists{\LogoPath}{\includegraphics[width=0.35\textwidth]{\LogoPath}\par}{}
+  \vspace*{1cm}
+  {\Large BACHELOR PROJECT\par}
+  \vspace{1.5cm}
+  {\LARGE "\ProjectTitle"\par}
+  \vspace{2cm}
+  {\Large \AuthorName\par}
+  {\large \StudentID\par}
+  \vspace{1cm}
+  {\large Study programme: \StudyProgramme\par}
+  {\large Specialization: \Specialization\par}
+  \vspace{2cm}
+  {\large SUPERVISOR\par}
+  {\large \SupervisorName\par}
+  {\large \SupervisorDept\par}
+  {\large \SupervisorFaculty\par}
+  \vfill
+  {\Large ZABRZE \ThesisYear\par}
+\end{titlepage}
+
+\pagenumbering{roman}
+\tableofcontents
+\clearpage
+
+\begin{abstract}
+Summarize the motivation, method, key results, and contributions in 150--250 words.
+\end{abstract}
+
+\clearpage
+\pagenumbering{arabic}
+
+\chapter{Introduction}
+\begin{itemize}
+  \item Problem statement and context (rehabilitation, remote monitoring, wearables).
+  \item Objectives and research questions/hypotheses.
+  \item Contributions (e.g., Fitbit-integrated rehab app, pose estimation, patient dashboard).
+  \item Thesis structure overview.
+\end{itemize}
+
+\chapter{Background and Related Work}
+\begin{itemize}
+  \item Digital health / tele-rehabilitation platforms and adherence.
+  \item Wearables and Fitbit API (OAuth2, scope, data availability/rate limits).
+  \item Pose estimation for exercise monitoring (e.g., MoveNet).
+  \item Brief survey of similar systems and gaps.
+\end{itemize}
+
+\chapter{System Design}
+
+This chapter describes the overall design of the rehabilitative monitoring system developed for this project ("RodRecover"). It explains the architecture, the major software components, the data models, the key API contracts, the Fitbit integration strategy, and security and privacy decisions. Where appropriate the design rationale is contrasted with related approaches from the literature.
+
+\section{Architecture Overview}
+
+The system follows a classical web application architecture with three primary layers:
+
+- \textbf{Client (Frontend):} A single-page application implemented in React. The UI provides therapist and patient views: dashboards, exercise runner, games, templates and calendar. It communicates with the backend over authenticated HTTP (JSON).
+- \textbf{API Server (Backend):} Node.js + Express application exposing a set of REST endpoints for authentication, templates, exercises, results, notifications, calendar and Fitbit integration. Business logic such as assignment consent, auto-allocation and permission checks lives here.
+- \textbf{Data Store:} MongoDB (hosted on Atlas) stores application documents: users, templates, exercises, results, notifications and configuration.
+
+Figure~\ref{fig:architecture} (placeholder) shows the high level components and their interactions: browser client, API server, Fitbit API, and persistent storage.
+
+% Placeholder for architecture figure
+\begin{figure}[ht]
+  \centering
+  \fbox{\parbox[c][6cm][c]{0.85\textwidth}{\centering Architecture diagram: React client \(HTTPS\) \rightarrow Express API \rightarrow MongoDB; Fitbit OAuth and HR data flows to the backend.}}
+  \caption{System architecture overview}
+  \label{fig:architecture}
+\end{figure}
+
+\subsection{Component Responsibilities}
+
+The responsibilities are partitioned as follows:
+
+- Frontend: render UI, handle client-side routing, local validation, and capture of media (camera) for pose-related exercises. It also displays HR and exercise feedback in near real-time.
+- Backend: authenticate requests (JWT), enforce role-based access control (therapist vs patient), orchestrate Fitbit OAuth and polling, compute exercise allocation heuristics, persist and query results, send notifications, and perform scheduled tasks (reminders, auto-allocate jobs).
+- Database: store and index documents, enable queries for calendar and reporting, and retain tokens (refresh/access) in an encrypted or protected form.
+
+\section{Data Model}
+
+The application uses a document-oriented model which maps naturally to the domain. The most important collections are summarized below (example fields shown; not exhaustive).
+
+\subsection{User}
+\begin{verbatim}
+{ _id, name, email, role: 'patient'|'therapist', therapistId, pendingTherapistId,
+  fitbit: { accessToken, refreshToken, expiresAt, userId },
+  vulnerabilityProfile: { tags: [...] },
+  createdAt }
+\end{verbatim}
+
+\subsection{Template}
+\begin{verbatim}
+{ _id, title, description, poseConfig, metadata: { vulnerabilityTags: [...], category },
+  createdBy, createdAt }
+\end{verbatim}
+
+\subsection{Exercise}
+\begin{verbatim}
+{ _id, title, description, poseConfig, metadata, assignedTo: [userId],
+  createdBy, dueAt, dailyReminder, originTemplateId?, createdAt }
+\end{verbatim}
+
+\subsection{Result}
+\begin{verbatim}
+{ _id, userId, exerciseId, type, score, metadata: { reps, duration, heartRate }, createdAt }
+\end{verbatim}
+
+\subsection{Notification}
+\begin{verbatim}
+{ _id, title, body, createdBy, recipients: [userId], data: {...}, createdAt, readAt }
+\end{verbatim}
+
+These models support features implemented in the codebase: therapist–patient linking, template instantiation, auto-allocation, scheduling, and reporting.
+
+\section{API Contracts (selected)}
+
+The backend exposes REST endpoints consumed by the client. The following are the most relevant for system design and the chapter's sequence diagrams.
+
+- POST /api/auth/login (obtain JWT)
+- GET /api/patients (therapist: list assigned patients)
+- POST /api/templates/:id/instantiate (create exercise(s) from a template)
+- POST /api/templates/auto-allocate (create exercise(s) based on vulnerabilities)
+- POST /api/exercises (create custom exercise)
+- PUT /api/exercises/:id (therapist edits scheduled exercise)
+- DELETE /api/exercises/:id (therapist deletes scheduled exercise)
+- GET /api/results?userId= (fetch patient results for reports)
+- GET /api/reports/export.csv?userId= (download CSV for a patient)
+- Fitbit routes: /api/fitbit/connect, /api/fitbit/callback, /api/fitbit/refresh, /api/fitbit/intraday (server-side polling and fallback endpoints)
+
+All endpoints are protected by the `verifyToken` middleware. Server-side handlers perform role checks (e.g., therapist may only operate on patients where patient.therapistId === therapist._id) and validate request bodies.
+
+\section{Fitbit Integration and HR Data Flow}
+
+Integration with Fitbit follows an OAuth 2.0 flow adapted for native clients and PKCE. The design constraints are:
+
+- Fitbit provides both daily summary and intraday heart rate. Intraday endpoints are rate-limited and may be unavailable for some users or time ranges.
+- For reliability the backend implements a fallback strategy: attempt to fetch intraday HR when available; otherwise use summary endpoints or cached HR data.
+- Tokens (access and refresh) are stored tied to the `User.fitbit` sub-document; refresh tokens are used by the server to obtain new access tokens as needed.
+
+Polling strategy and caching:
+
+1. When a patient opens the Exercise Runner, the frontend requests HR via the backend.
+2. The backend checks the stored access token and its expiry. If expired (or absent) it uses the refresh token to obtain a fresh access token.
+3. The backend first queries the intraday endpoint for the requested time range. If a 429 or missing data is returned, it falls back to the summary endpoint or returns the most recent cached HR datapoint.
+4. The HR values are returned to the client over TLS; the client displays them on the runner screen alongside pose feedback.
+
+This reduces the client complexity and centralizes token refresh logic and rate-limit handling on the server.
+
+\section{Sequence Flows}
+
+Below are two important flows expressed as ordered steps. They are intentionally explicit so the implementation can be validated against them.
+
+\subsection{Sequence: Dashboard HR polling (when patient opens runner)}
+\begin{enumerate}
+  \item Client: `GET /api/fitbit/hr?start=...&end=...` (includes JWT)
+  \item Server: verify JWT, load user record and `User.fitbit` tokens
+  \item Server: if access token expired, call Fitbit token endpoint using `refresh_token`
+  \item Server: call Fitbit intraday API for time range
+  \item Server: if intraday returns 200 with data, normalize and cache subset in DB, return HR datapoints
+  \item \textit{else} if intraday returns 429 or empty, call daily summary endpoint and return summary value
+  \item Client: render HR overlay and continue polling at configured interval (e.g., 5–15 seconds)
+\end{enumerate}
+
+\subsection{Sequence: Exercise submission (patient completes exercise)}
+\begin{enumerate}
+  \item Client: POST `/api/results` with exercise outcome (score, duration, metadata)
+  \item Server: verify JWT and user identity; validate exerciseId belongs to the patient or is open
+  \item Server: persist `Result` document and optionally update exercise state (e.g., mark completed)
+  \item Server: compute and store derived metrics (e.g., aggregated score)
+  \item Server: send notifications to therapist (via Notification collection) and run background jobs (reminder cancelation, analytics)
+  \item Therapist UI: polls or subscribes (via periodic fetch) and shows updated results in dashboard
+\end{enumerate}
+
+Sequence diagrams can be produced from these steps (e.g., with TikZ or PlantUML) and included as figures once the development environment for LaTeX figures is configured.
+
+\section{Authorization and Permission Model}
+
+The system uses JWTs to identify users. The `verifyToken` middleware extracts user id and role, and several endpoints perform additional checks:
+
+- Therapists may only act on patients where `patient.therapistId === therapist._id`.
+- Patients may only access their own results and Fitbit data.
+- Template instantiation validates that the assigned patient(s) exist and are assigned to the requesting therapist.
+
+This model prevents privilege escalation by ensuring ownership is checked server-side for each state-mutating operation.
+
+\section{Security and Privacy Considerations}
+
+Key decisions to protect sensitive health data:
+
+- \textbf{Transport:} all client-server traffic must use HTTPS (TLS). The backend endpoints assume TLS termination at the hosting layer.
+- \textbf{Token storage:} Fitbit refresh tokens and access tokens are stored in the database and access is limited to the backend. Tokens should be encrypted at rest or stored in a secrets manager for production deployment.
+- \textbf{Least privilege:} access control checks are enforced server-side. The client receives only the data it is authorized to view.
+- \textbf{Data retention and minimization:} HR intraday data is stored only when necessary (e.g., when associated with a result) and aggregated values are preferred for long-term storage.
+- \textbf{Audit logging:} actions such as therapist assignment, exercise creation, and result uploads are recorded to allow traceability.
+
+Further privacy analysis and a formal Data Protection Impact Assessment (DPIA) would be required for production deployment, especially when handling biometric data.
+
+\section{Scalability and Reliability}
+
+The design supports reasonable scale for a departmental deployment:
+
+- Stateless API servers can be scaled horizontally behind a load balancer; JWTs enable stateless authentication.
+- MongoDB Atlas provides managed scaling and indexing for query performance.
+- Rate-limited third-party APIs (Fitbit) are the primary external constraint; the backend's caching and fallback strategies mitigate this.
+- Background jobs (auto-allocate, reminders) run outside request paths and can be scheduled with a job queue (e.g., Bull, Agenda) or simple cron tasks.
+
+\section{Implementation Notes and Rationale}
+
+The architecture favors simplicity and developer productivity: a React SPA for fast UI iteration, a small Express API for business logic, and MongoDB for flexible schema evolution. Centralizing Fitbit logic on the server reduces client complexity and secures tokens.
+
+This design is influenced by typical tele-rehab systems in the literature but tailored to the project's features: therapist-driven assignment, template-based exercise instantiation, and an allocator that matches patients to templates based on recorded vulnerabilities and pose constraints.
+
+\clearpage
+
+\chapter{Implementation}
+\begin{itemize}
+  \item Frontend: PatientDashboard, ExerciseRunner (pose detection, video capture, HR display).
+  \item Backend: Fitbit routes (PKCE flow, summary/intraday fallbacks, caching), results API.
+  \item Data models: users, exercises, results, notifications (include schema snippets).
+  \item Error handling and fallbacks (rate limits, cached HR, summary HR).
+\end{itemize}
+
+\chapter{Evaluation}
+\begin{itemize}
+  \item Functional tests (OAuth flow, HR retrieval, exercise recording).
+  \item Performance (poll intervals, response times).
+  \item Reliability under constraints (429 rate limits, no-sensor data scenarios).
+  \item Usability/heuristic review (if no user study).
+\end{itemize}
+
+\chapter{Results}
+\begin{itemize}
+  \item Present findings from tests/experiments.
+  \item Screenshots or figures of the dashboard and exercise runner.
+  \item Any measured metrics (latency, success rate, correctness of HR fallback).
+\end{itemize}
+
+\chapter{Discussion}
+\begin{itemize}
+  \item Interpret results relative to objectives/questions.
+  \item Limitations (Fitbit data availability, rate limits, pose estimation robustness).
+  \item Threats to validity.
+\end{itemize}
+
+\chapter{Future Work}
+\begin{itemize}
+  \item Alternative wearables/providers; better buffering/caching.
+  \item Improved coaching/pose feedback; clinician analytics; offline support.
+\end{itemize}
+
+\chapter{Conclusion}
+\begin{itemize}
+  \item Summarize contributions and outcomes.
+  \item Reflect on impact and next steps.
+\end{itemize}
+
+\printbibliography
+
+\appendix
+\chapter{Appendix}
+\begin{itemize}
+  \item Environment setup and run instructions.
+  \item API endpoints summary.
+  \item Additional figures or code listings as needed.
+\end{itemize}
+
+\end{document}

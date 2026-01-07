@@ -188,6 +188,14 @@ router.post('/:id/instantiate', verifyToken, async (req, res) => {
       if (Object.keys(overrides.poseConfig).length === 0) delete overrides.poseConfig;
     }
 
+    // avoid duplicate assignment of same template to same patient
+    const dupExists = await Exercise.findOne({
+      templateId: tpl._id,
+      assignedTo: { $in: validAssigned },
+      createdBy: req.user.id
+    });
+    if (dupExists) return res.status(400).json({ success:false, error:'Already assigned from this template to this patient' });
+
     // merge with overrides (shallow for simplicity)
     const exerciseDoc = new Exercise({
       title: overrides.title || tpl.title,

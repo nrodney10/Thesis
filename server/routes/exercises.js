@@ -66,6 +66,18 @@ router.post('/', verifyToken, async (req, res) => {
     const meta = { ...(metadata || {}) };
     if (!meta.assignmentType) meta.assignmentType = 'exercise';
 
+    // avoid duplicate assignments of same type/title to same patient (games and exercises)
+    if (validAssigned.length) {
+      const assignType = meta.assignmentType || 'exercise';
+      const dup = await Exercise.findOne({
+        createdBy: req.user.id,
+        title,
+        'metadata.assignmentType': assignType,
+        assignedTo: { $in: validAssigned }
+      });
+      if (dup) return res.status(400).json({ success:false, error:`${assignType.charAt(0).toUpperCase()+assignType.slice(1)} already assigned to one of the selected patients` });
+    }
+
     const ex = new Exercise({ title, description, assignedTo: validAssigned, metadata: meta, poseConfig, createdBy: req.user.id, dueAt: dueAt ? new Date(dueAt) : undefined, dailyReminder: !!dailyReminder });
     await ex.save();
 
