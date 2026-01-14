@@ -20,6 +20,28 @@ router.get("/", verifyToken, async (req, res) => {
   }
 });
 
+// GET /api/patients/:id - return a single patient's public info
+router.get('/:id', verifyToken, async (req, res) => {
+  try {
+    const patientId = req.params.id;
+    const patient = await User.findById(patientId).select('-password');
+    if (!patient || patient.role !== 'patient') return res.status(404).json({ success: false, message: 'Patient not found' });
+
+    // Patients may fetch their own record; therapists may fetch only their assigned patients
+    if (req.user.role === 'patient' && String(req.user.id) !== String(patientId)) {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
+    if (req.user.role === 'therapist' && patient.therapistId && String(patient.therapistId) !== String(req.user.id)) {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
+
+    res.json({ success: true, patient });
+  } catch (err) {
+    console.error('Get patient error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/patients/available - therapist-only: patients that are not assigned and not pending
 router.get('/available', verifyToken, async (req, res) => {
   try {

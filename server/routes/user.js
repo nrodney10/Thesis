@@ -8,7 +8,18 @@ const router = express.Router();
 // Get current user profile
 router.get('/me', verifyToken, async (req, res) => {
   const u = await User.findById(req.user.id).select('-password');
-  res.json({ success:true, user:u });
+  if (!u) return res.status(404).json({ success:false, message:'User not found' });
+  // If this user has an assigned therapist, include a friendly name for clients
+  const userObj = u.toObject ? u.toObject() : { ...u };
+  try {
+    if (userObj.therapistId) {
+      const t = await User.findById(userObj.therapistId).select('name email');
+      if (t) userObj.therapistName = t.name || (t.email ? t.email.split('@')[0] : 'Therapist');
+    }
+  } catch (e) {
+    // ignore lookup errors
+  }
+  res.json({ success:true, user: userObj });
 });
 
 // Update profile (name, age, email, vulnerabilityProfile)

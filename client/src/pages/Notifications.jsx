@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 export default function Notifications() {
-  const { authFetch, decrementNotifications, refreshIndicators, user } = useAuth();
+  const { authFetch, decrementNotifications, refreshIndicators, user, refreshProfile } = useAuth();
   const [items, setItems] = useState([]);
   const [actionStatus, setActionStatus] = useState({});
 
@@ -59,6 +59,8 @@ export default function Notifications() {
         setItems((prev)=>prev.filter(n => n._id !== notif._id));
         try { await authFetch(`http://localhost:5000/api/notifications/${notif._id}/read`, { method:'POST' }); } catch (_) {}
         refreshIndicators();
+        // Refresh the logged-in user's profile so therapist assignment appears immediately
+        try { if (refreshProfile) await refreshProfile(); } catch (_) {}
         setActionStatus((s)=>({ ...s, [notif._id]: finalStatus }));
       } else {
         alert(j.message || 'Action failed');

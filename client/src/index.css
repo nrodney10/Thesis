@@ -67,8 +67,13 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 
 .bg-gray-700 { background-color: #e5e7eb !important; color: var(--text-strong) !important; }
 .bg-gray-600 { background-color: #d1d5db !important; color: var(--text-strong) !important; }
 .text-gray-100, .text-slate-100 { color: var(--text-strong) !important; }
-.text-gray-300 { color: var(--text-muted) !important; }
-.text-gray-400, .text-slate-400 { color: #6b7280 !important; }
+.text-gray-100 { color: var(--text-strong) !important; }
+/* Make muted/light gray text more visible across the app (profiles, dashboards) */
+.text-gray-200, .text-slate-200,
+.text-gray-300, .text-slate-300,
+.text-gray-400, .text-slate-400 {
+  color: var(--text-muted) !important;
+}
 .border-gray-700, .border-slate-800 { border-color: #e5e7eb !important; }
 .shadow, .shadow-lg, .shadow-xl { box-shadow: var(--shadow-soft) !important; }
 

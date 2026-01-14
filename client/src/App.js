@@ -11,6 +11,7 @@ import Games from "./pages/Games";
 import GamePlayer from "./pages/GamePlayer";
 import Exercises from "./pages/Exercises";
 import Reports from "./pages/Reports";
+import Results from "./pages/Results";
 import Messages from "./pages/Messages";
 import Notifications from "./pages/Notifications";
 import Settings from "./pages/Settings";
@@ -50,6 +51,7 @@ function App() {
           <Route path="/templates" element={<ProtectedRoute requiredRole="therapist"><Templates /></ProtectedRoute>} />
           <Route path="/exercises/run" element={<ProtectedRoute requiredRole="patient"><ExerciseRunner /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+          <Route path="/results" element={<ProtectedRoute><Results /></ProtectedRoute>} />
           <Route path="/calendar" element={<ProtectedRoute><PatientCalendar /></ProtectedRoute>} />
           <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
           <Route path="/messages" element={<ProtectedRoute><Messages /></ProtectedRoute>} />

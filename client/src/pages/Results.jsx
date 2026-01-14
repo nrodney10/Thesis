@@ -1,0 +1,244 @@
+import React, { useEffect, useState } from "react";
+import { useAuth } from "../context/AuthContext";
+import { Link, useLocation } from "react-router-dom";
+import UnreadBadge from "../components/UnreadBadge";
+
+export default function Results() {
+  const { authFetch, messagesUnread, notificationsUnread, user } = useAuth();
+  const [results, setResults] = useState([]);
+  const [activities, setActivities] = useState([]);
+  const [activitiesError, setActivitiesError] = useState(null);
+  const [visibleCount, setVisibleCount] = useState(6);
+  const [expandedIds, setExpandedIds] = useState(new Set());
+  const [loading, setLoading] = useState(false);
+  const location = useLocation();
+
+  const query = new URLSearchParams(location.search);
+  const userId = query.get('userId');
+  const prefetched = location.state || {};
+  const [patientName, setPatientName] = useState(null);
+
+  const fetchResults = async () => {
+    setLoading(true);
+    try {
+      const url = userId ? `http://localhost:5000/api/results?userId=${encodeURIComponent(userId)}` : `http://localhost:5000/api/results`;
+      const res = await authFetch(url);
+      const data = await res.json();
+      if (data.success) {
+        const list = data.results || [];
+        // dedupe results by id
+        const uniq = (() => {
+          const seen = new Set();
+          return list.filter(r => {
+            const id = r._id || r.id;
+            if (!id) return false;
+            if (seen.has(id)) return false;
+            seen.add(id);
+            return true;
+          });
+        })();
+        setResults(uniq);
+        // If viewing a specific patient's results (therapist clicked View Results), show all by default
+        if (userId) setVisibleCount(uniq.length);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchActivities = async () => {
+    try {
+      setActivitiesError(null);
+      if (!user) return;
+      let url;
+      if (user.role === 'patient') url = `http://localhost:5000/api/calendar/patient`;
+      else if (user.role === 'therapist' && userId) url = `http://localhost:5000/api/calendar/patient/${encodeURIComponent(userId)}`;
+      else if (user.role === 'therapist') url = `http://localhost:5000/api/calendar/therapist`;
+      else return;
+
+      console.debug('Fetching activities from', url);
+      const r = await authFetch(url);
+      let j;
+      try {
+        j = await r.json();
+      } catch (e) {
+        const text = await r.text();
+        console.error('Non-JSON response from activities endpoint', r.status, text);
+        setActivitiesError(`Server returned ${r.status}`);
+        return;
+      }
+      if (!r.ok) {
+        console.error('Activities fetch failed', r.status, j);
+        setActivitiesError(j && j.error ? String(j.error) : `Status ${r.status}`);
+        return;
+      }
+      if (j && j.success) {
+        setActivities(j.items || []);
+      } else {
+        console.warn('Activities fetch returned no success', j);
+        setActivitiesError(j && j.error ? String(j.error) : 'No activities');
+      }
+    } catch (e) {
+      console.error('fetchActivities error', e);
+      setActivitiesError(String(e));
+    }
+  };
+
+  useEffect(() => {
+    // If results were prefetched by the therapist dashboard, use them and skip fetching
+    if (prefetched.prefetchedResults) {
+      const list = prefetched.prefetchedResults || [];
+      const seen = new Set();
+      const uniq = list.filter(r => {
+        const id = r._id || r.id;
+        if (!id) return false;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+      setResults(uniq);
+      // show all when a therapist prefetched them for a patient
+      if (userId) setVisibleCount(uniq.length);
+    } else {
+      fetchResults();
+    }
+
+    // Fetch patient name when viewing a specific patient's results
+    const fetchPatientName = async () => {
+      try {
+        if (!userId) return;
+        if (prefetched.prefetchedPatientName) {
+          setPatientName(prefetched.prefetchedPatientName);
+          return;
+        }
+        const r = await authFetch(`http://localhost:5000/api/patients/${encodeURIComponent(userId)}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (j && j.success && j.patient) setPatientName(j.patient.name || null);
+      } catch (e) { /* ignore */ }
+    };
+    fetchPatientName();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
+
+  // Fetch activities when the authenticated user becomes available
+  useEffect(() => {
+    // If activities were prefetched by therapist dashboard, use them
+    if (prefetched.prefetchedActivities) {
+      const list = prefetched.prefetchedActivities || [];
+      const seen = new Set();
+      const uniq = list.filter(a => {
+        const id = a.id || a._id;
+        if (!id) return false;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+      setActivities(uniq);
+    } else {
+      fetchActivities();
+    }
+    // only re-run when user or viewed userId changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, userId]);
+
+  return (
+    <div className="min-h-screen p-8 bg-gray-900 text-gray-100">
+      <div className="max-w-4xl mx-auto bg-transparent">
+        <div className="bg-gray-800 p-6 rounded shadow">
+          <div className="flex justify-between items-center mb-4">
+            <h1 className="text-2xl font-bold">{userId ? `Results for ${patientName || userId}` : 'Recent Results'}</h1>
+            <div className="flex items-center gap-3">
+              <Link to="/notifications" className="text-sm">Notifications <UnreadBadge count={notificationsUnread} /></Link>
+              <Link to="/messages" className="text-sm">Messages <UnreadBadge count={messagesUnread} /></Link>
+            </div>
+          </div>
+
+          {loading ? (
+            <p>Loading...</p>
+          ) : (
+            <>
+              {/* Recent activities compact list removed — using results cards below instead */}
+
+              {results.length === 0 ? (
+                <p className="text-gray-400">No results yet.</p>
+              ) : (
+                <div>
+                  <ul className="space-y-2">
+                    {results.slice(0, visibleCount).map((r) => {
+                      const isOpen = expandedIds.has(r._id);
+                      return (
+                        <li key={r._id} className="card result-card flex flex-col bg-gray-900 p-3 rounded">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="text-sm text-gray-200 font-medium">{r.title || r.type || 'Result'}</div>
+                              <div className="text-xs text-gray-400">{new Date(r.createdAt).toLocaleString()}</div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-sm font-semibold text-white">{r.score ?? '--'}</div>
+                              <button
+                                onClick={() => {
+                                  const s = new Set(expandedIds);
+                                  if (s.has(r._id)) s.delete(r._id); else s.add(r._id);
+                                  setExpandedIds(s);
+                                }}
+                                className="text-sm px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                              >
+                                {isOpen ? 'Hide' : 'Details'}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className={`collapse mt-2 ${isOpen ? 'open' : ''}`}>
+                            <div className="collapse-inner">
+                              {r.metadata?.video && (
+                                <div className="text-sm text-gray-300 mb-2">Video: <a href={r.metadata.video} target="_blank" rel="noreferrer" className="text-indigo-300 underline">View clip</a></div>
+                              )}
+                              {r.metadata?.poseMetrics && (
+                                <div className="text-sm text-gray-300">
+                                  <div>Reps: {r.metadata.poseMetrics.reps ?? 0}</div>
+                                  <div>Avg angle: {r.metadata.poseMetrics.avgAngle ? Math.round(r.metadata.poseMetrics.avgAngle) + ' deg' : '—'}</div>
+                                  <div>Cadence: {r.metadata.poseMetrics.cadence ? Math.round(r.metadata.poseMetrics.cadence) + '/min' : '—'}</div>
+                                  {r.metadata.poseMetrics.quality && (
+                                    <div>Quality: {Array.isArray(r.metadata.poseMetrics.quality) ? r.metadata.poseMetrics.quality.join(', ') : String(r.metadata.poseMetrics.quality)}</div>
+                                  )}
+                                </div>
+                              )}
+                              {(!r.metadata?.video && !r.metadata?.poseMetrics) && (
+                                <div className="text-sm text-gray-400">No extra details available.</div>
+                              )}
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+
+                  <div className="mt-3 text-center">
+                    {visibleCount < results.length ? (
+                      <button
+                        onClick={() => setVisibleCount(Math.min(results.length, visibleCount + 6))}
+                        className="px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 text-sm"
+                      >
+                        Load more (+6)
+                      </button>
+                    ) : results.length > 6 ? (
+                      <button
+                        onClick={() => { setVisibleCount(6); setExpandedIds(new Set()); }}
+                        className="px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 text-sm"
+                      >
+                        Show less
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

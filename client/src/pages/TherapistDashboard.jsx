@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import UnreadBadge from "../components/UnreadBadge";
+import TrendChart from "../components/TrendChart";
 
 export default function TherapistDashboard() {
   const { user, authFetch, logout, notificationsUnread, messagesUnread } = useAuth();
@@ -13,9 +15,12 @@ export default function TherapistDashboard() {
   const [schedule, setSchedule] = useState([]);
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [selectedDateExercise, setSelectedDateExercise] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selectedDateCognitive, setSelectedDateCognitive] = useState(() => new Date().toISOString().slice(0, 10));
   const [therapistLink, setTherapistLink] = useState({ patientId: '', status: '' });
   const [removeLink, setRemoveLink] = useState({ patientId: '', status: '' });
   const navigate = useNavigate();
+  const { push } = useToast();
 
   // Mock data used until API endpoints are added
   useEffect(() => {
@@ -72,16 +77,58 @@ export default function TherapistDashboard() {
     setLoadingResults(false);
   };
 
+  
+
   // Navigate to Exercises page and preselect patient for assignment
   const assignExercise = (patientId) => {
     if (!patientId) return;
     navigate(`/exercises?patientId=${patientId}`);
   };
 
-  const viewResultsForPatient = (patientId) => {
+  const viewResultsForPatient = async (patientId) => {
     if (!patientId) return;
-    // Open the reports page filtered to this patient
-    navigate(`/reports?userId=${patientId}`);
+    try {
+      // Prefetch results and recent activities for the selected patient so Results page can render immediately
+      console.debug('viewResultsForPatient: fetching patient results and activities', patientId);
+      const [resR, resA] = await Promise.all([
+        authFetch(`http://localhost:5000/api/results?userId=${patientId}`),
+        authFetch(`http://localhost:5000/api/calendar/patient/${patientId}`)
+      ]);
+      let prefetchedResults = [];
+      let prefetchedActivities = [];
+
+      if (resR.ok) {
+        try { const resultsJson = await resR.json(); if (resultsJson && resultsJson.success) prefetchedResults = resultsJson.results || []; }
+        catch(e){ console.warn('Failed to parse results JSON', e); }
+      } else {
+        console.warn('results fetch not ok', resR.status);
+      }
+
+      // Prefer using already-loaded `recentResults` (fetched when selecting patient) to show recent activity immediately
+      if (recentResults && recentResults.length) {
+        prefetchedActivities = recentResults.map(r => ({
+          id: r._id,
+          title: r.title || r.type || 'Result',
+          description: r.type || '',
+          dueAt: r.createdAt,
+          dailyReminder: false,
+          assignedTo: selectedPatient ? { name: selectedPatient.name } : undefined
+        }));
+      } else {
+        if (resA.ok) {
+          try { const activitiesJson = await resA.json(); if (activitiesJson && activitiesJson.success) prefetchedActivities = activitiesJson.items || []; }
+          catch(e){ console.warn('Failed to parse activities JSON', e); }
+        } else {
+          console.warn('activities fetch not ok', resA.status);
+        }
+      }
+
+      navigate(`/results?userId=${patientId}`, { state: { prefetchedResults, prefetchedActivities } });
+    } catch (e) {
+      console.error('prefetch view results failed', e);
+      // fallback: navigate without state so Results page will attempt its own fetch
+      navigate(`/results?userId=${patientId}`);
+    }
   };
 
   const exportCsvForPatient = async (patientId) => {
@@ -203,6 +250,18 @@ export default function TherapistDashboard() {
     }
   }, [filteredPatients, selectedPatient]);
 
+  // compute daily filtered summaries for selected date
+  const exerciseForDate = (date) => recentResults.filter(r => {
+    if (!r.createdAt) return false;
+    const d = new Date(r.createdAt).toISOString().slice(0, 10);
+    return d === date && (r.type === 'exercise' || r.type === 'physical');
+  });
+  const cognitiveForDate = (date) => recentResults.filter(r => {
+    if (!r.createdAt) return false;
+    const d = new Date(r.createdAt).toISOString().slice(0, 10);
+    return d === date && (r.type === 'game' || r.type === 'cognitive');
+  });
+
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100">
       <div className="container mx-auto p-6">
@@ -261,6 +320,7 @@ export default function TherapistDashboard() {
                 <button className="px-3 py-2 bg-indigo-600 rounded text-sm" onClick={()=>navigate('/register')}>
                   New Patient
                 </button>
+                {/* View Results button removed per request */}
               </div>
             </div>
 
@@ -279,44 +339,57 @@ export default function TherapistDashboard() {
               </div>
             </div>
 
-            <div className="bg-gray-800 rounded-lg p-4 mb-4 shadow">
-              <h3 className="text-lg font-medium mb-2">Engagement (last 7 days)</h3>
-              {loadingResults ? (
-                <div className="w-full h-36 flex items-center justify-center">Loading...</div>
-              ) : (
-                // small sparkline built from recentResults
-                <svg className="w-full h-36" viewBox="0 0 100 36" preserveAspectRatio="none">
-                  <polyline
-                    fill="none"
-                    stroke="#7c3aed"
-                    strokeWidth="1.5"
-                    points={recentResults.slice(0, 20).map((r, i) => {
-                      const x = (i / Math.max(1, recentResults.length - 1)) * 100;
-                      const y = 36 - Math.min(36, (r.score / 100) * 36);
-                      return `${x},${y}`;
-                    }).join(' ')}
-                  />
-                </svg>
-              )}
+            <div className="grid grid-cols-1 gap-4 mb-4">
+              <div className="bg-gray-800 rounded-lg p-4 shadow">
+                <div className="space-y-6 mb-4">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-sm text-gray-200 font-semibold">Cognitive trends</div>
+                      <div className="flex items-center gap-3">
+                        <label className="text-xs text-gray-300">Date</label>
+                        <input type="date" value={selectedDateCognitive} onChange={(e)=>setSelectedDateCognitive(e.target.value)} className="bg-gray-700 text-sm text-gray-100 px-2 py-1 rounded" />
+                      </div>
+                    </div>
+                    <div className="text-xs text-gray-300 mb-2">
+                      {(() => {
+                        const list = cognitiveForDate(selectedDateCognitive);
+                        if (!list.length) return (<div className="text-xs text-gray-400">No cognitive games on {selectedDateCognitive}.</div>);
+                        return (<div>Items: {list.length} • Avg: {Math.round((list.reduce((s,r)=>s+(r.score||0),0)/list.length)||0)}</div>);
+                      })()}
+                    </div>
+                    {loadingResults ? (
+                      <div className="w-full h-40 flex items-center justify-center">Loading...</div>
+                      ) : (
+                      <TrendChart label="Cognitive trends" color="#10B981" data={recentResults} types={["game","cognitive"]} limit={60} height={320} yLabel="Score" showHeader={true} />
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-sm text-gray-200 font-semibold">Exercise trends</div>
+                      <div className="flex items-center gap-3">
+                        <label className="text-xs text-gray-300">Date</label>
+                        <input type="date" value={selectedDateExercise} onChange={(e)=>setSelectedDateExercise(e.target.value)} className="bg-gray-700 text-sm text-gray-100 px-2 py-1 rounded" />
+                      </div>
+                    </div>
+                    <div className="text-xs text-gray-300 mb-2">
+                      {(() => {
+                        const list = exerciseForDate(selectedDateExercise);
+                        if (!list.length) return (<div className="text-xs text-gray-400">No exercises on {selectedDateExercise}.</div>);
+                        return (<div>Items: {list.length} • Avg: {Math.round((list.reduce((s,r)=>s+(r.score||0),0)/list.length)||0)}</div>);
+                      })()}
+                    </div>
+                    {loadingResults ? (
+                      <div className="w-full h-40 flex items-center justify-center">Loading...</div>
+                    ) : (
+                      <TrendChart label="Exercise trends" color="#8B5CF6" data={recentResults} types={["exercise","physical"]} limit={60} height={320} yLabel="Score" showHeader={true} />
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="bg-gray-800 rounded-lg p-4 shadow">
-              <h3 className="text-lg font-medium mb-2">Recent activity</h3>
-              <ul className="space-y-3">
-                {recentResults.map((r) => (
-                  <li key={r._id} className="flex items-center justify-between bg-gray-900 p-3 rounded">
-                    <div>
-                      <div className="text-sm font-semibold">{patients.find(p=>p.id===r.userId)?.name || r.userId}</div>
-                      <div className="text-xs text-gray-400">{r.type} • {new Date(r.createdAt).toLocaleString()}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-sm font-bold">{r.score}</div>
-                      <div className="text-xs text-green-300">{r.score>75? 'Good':'Needs review'}</div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {/* Recent activity moved to the Results page (use 'View Results') */}
           </main>
 
           {/* Right column */}

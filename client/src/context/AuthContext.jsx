@@ -17,26 +17,28 @@ export function AuthProvider({ children }) {
   const [messagesUnread, setMessagesUnread] = useState(0);
   const [indicatorsLoading, setIndicatorsLoading] = useState(false);
 
-  // If token exists but we don't have a user object (edge case), fetch the profile once
+  const refreshProfile = useCallback(async () => {
+    if (!token) return null;
+    try {
+      const res = await fetch('http://localhost:5000/api/user/me', { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return null;
+      const j = await res.json();
+      if (j.success) {
+        setUser(j.user || null);
+        // persist in same storage as token
+        if (localStorage.getItem('token') === token) localStorage.setItem('user', JSON.stringify(j.user));
+        else sessionStorage.setItem('user', JSON.stringify(j.user));
+        return j.user || null;
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }, [token]);
+
   useEffect(() => {
-    let mounted = true;
-    const fetchProfile = async () => {
-      if (!token || user) return;
-      try {
-        const res = await fetch('http://localhost:5000/api/user/me', { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) return;
-        const j = await res.json();
-        if (j.success && mounted) {
-          setUser(j.user || null);
-          // persist in same storage as token
-          if (localStorage.getItem('token') === token) localStorage.setItem('user', JSON.stringify(j.user));
-          else sessionStorage.setItem('user', JSON.stringify(j.user));
-        }
-      } catch (e) { /* ignore */ }
-    };
-    fetchProfile();
-    return () => { mounted = false; };
-  }, [token, user]);
+    // Only fetch profile automatically if we don't have one yet
+    if (!token) return;
+    if (!user) refreshProfile();
+  }, [token, user, refreshProfile]);
 
   const login = ({ token: newToken, user: newUser, remember }) => {
     if (remember) {
@@ -114,6 +116,7 @@ export function AuthProvider({ children }) {
       messagesUnread,
       refreshIndicators,
       indicatorsLoading,
+      refreshProfile,
       decrementNotifications,
       decrementMessages,
       incrementMessages

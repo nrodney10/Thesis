@@ -1,15 +1,19 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const user = JSON.parse(localStorage.getItem("user"));
+  const { user } = useAuth();
 
-  if (!user) {
-    alert("Please log in first.");
-    navigate("/login");
-    return null;
-  }
+  useEffect(() => {
+    if (!user) {
+      // silently redirect to login if not authenticated
+      navigate("/login");
+    }
+  }, [user, navigate]);
+
+  if (!user) return null;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-gray-100">
@@ -20,7 +24,7 @@ const Dashboard = () => {
 
         <button
           onClick={() => {
-            localStorage.removeItem("user");
+            // logout handled elsewhere; navigate to login
             navigate("/login");
           }}
           className="mt-6 bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-lg"
