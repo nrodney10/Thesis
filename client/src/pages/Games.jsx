@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useNavigate } from 'react-router-dom';
@@ -8,7 +8,7 @@ export default function Games() {
   const { push } = useToast();
   const [patients, setPatients] = useState([]);
   const [selected, setSelected] = useState(new Set());
-  const [form, setForm] = useState({ game: 'memory', note: '' });
+  const [form, setForm] = useState({ game: 'memory', note: '', dueAt: '' });
   const [status, setStatus] = useState('');
   const [assignments, setAssignments] = useState([]);
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
@@ -16,6 +16,8 @@ export default function Games() {
   const [selectedAssignmentIds, setSelectedAssignmentIds] = useState(new Set());
   const [patientAssignments, setPatientAssignments] = useState([]);
   const [patientLoading, setPatientLoading] = useState(false);
+  const [now, setNow] = useState(() => new Date());
+  const userId = user?.id || user?._id;
 
   useEffect(() => {
     const load = async () => {
@@ -78,6 +80,36 @@ export default function Games() {
     loadPatientAssignments();
   }, [authFetch, user?.role]);
 
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const startOfToday = useMemo(() => {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, [now]);
+
+  const completionStatus = (item) => {
+    if (!userId) return null;
+    const entry = (item?.completions || []).find((c) => String(c.userId) === String(userId));
+    if (!entry) return null;
+    const completedAt = entry.completedAt ? new Date(entry.completedAt) : null;
+    if (!completedAt || Number.isNaN(completedAt.getTime())) return null;
+    const completedToday = completedAt >= startOfToday;
+    return { completedAt, completedToday };
+  };
+
+  const visiblePatientAssignments = useMemo(() => {
+    return patientAssignments.filter((g) => {
+      const status = completionStatus(g);
+      if (!status) return true;
+      // Hide the next day
+      return status.completedAt >= startOfToday;
+    });
+  }, [patientAssignments, startOfToday]);
+
   const toggle = (id) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -110,8 +142,50 @@ export default function Games() {
     resetSelection();
   }, [selectedPatientId]);
 
+  const splitPatientGames = useMemo(() => {
+    const ready = [];
+    const scheduled = [];
+    visiblePatientAssignments.forEach((g) => {
+      const dueMs = g?.dueAt ? new Date(g.dueAt).getTime() : NaN;
+      if (Number.isFinite(dueMs)) scheduled.push(g); else ready.push(g);
+    });
+    scheduled.sort((a, b) => {
+      const aMs = a?.dueAt ? new Date(a.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
+      const bMs = b?.dueAt ? new Date(b.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
+      return aMs - bMs;
+    });
+    return { readyGames: ready, scheduledGames: scheduled };
+  }, [visiblePatientAssignments]);
+
+  const canStartGame = (g) => {
+    const dueMs = g?.dueAt ? new Date(g.dueAt).getTime() : NaN;
+    if (Number.isFinite(dueMs) && dueMs > now.getTime()) return false;
+    const completed = completionStatus(g);
+    if (completed?.completedToday) return false;
+    return true;
+  };
+
+  const countdownFor = (dueAt) => {
+    if (!dueAt) return '';
+    const dueMs = new Date(dueAt).getTime();
+    if (!Number.isFinite(dueMs)) return '';
+    const diff = dueMs - now.getTime();
+    if (diff <= 0) return 'Ready now';
+    const totalSeconds = Math.floor(diff / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (days > 0) return `${days}d ${hours}h`;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
   const sendAssignment = async () => {
     if (!selected.size) { push('Select at least one patient', 'error'); return; }
+    if (!form.dueAt) { push('Pick a schedule date for this game', 'error'); return; }
+    const dateOnly = new Date(form.dueAt);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    if (dateOnly < today) { push('Scheduled date cannot be in the past', 'error'); return; }
     setStatus('Sending...');
     try {
       const title = form.game === 'memory' ? 'Memory Match' : 'Stroop Test';
@@ -120,7 +194,8 @@ export default function Games() {
         title,
         description: body,
         assignedTo: Array.from(selected),
-        metadata: { assignmentType: 'game', gameKey: form.game }
+        metadata: { assignmentType: 'game', gameKey: form.game },
+        dueAt: form.dueAt
       };
       const r = await authFetch('http://localhost:5000/api/exercises', {
         method:'POST',
@@ -131,7 +206,7 @@ export default function Games() {
       if (j.success) {
         push(`Game assigned`, 'success');
         setSelected(new Set());
-        setForm({ ...form, note: '' });
+        setForm({ ...form, note: '', dueAt: '' });
         setStatus('Sent');
         fetchAssignments();
       } else {
@@ -173,6 +248,16 @@ export default function Games() {
   };
 
   const navigate = useNavigate();
+  const readyGames = splitPatientGames.readyGames;
+  const scheduledGames = splitPatientGames.scheduledGames;
+
+  const startGame = (g) => {
+    if (!canStartGame(g)) {
+      push(`This game is scheduled for ${g.dueAt ? new Date(g.dueAt).toLocaleString() : 'a future date'}`, 'info');
+      return;
+    }
+    navigate(`/games/play/${g._id}`);
+  };
 
   if (user?.role === 'therapist') {
     return (
@@ -182,7 +267,7 @@ export default function Games() {
             <h1 className="text-2xl font-bold">Assign Games</h1>
             <p className="text-gray-300">Pick a cognitive game and notify patients to complete it.</p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <label className="text-sm">
               Game
               <select value={form.game} onChange={e=>setForm({ ...form, game: e.target.value })} className="w-full bg-gray-700 p-2 rounded mt-1">
@@ -193,6 +278,16 @@ export default function Games() {
             <label className="text-sm">
               Note to patient (optional)
               <input value={form.note} onChange={e=>setForm({ ...form, note: e.target.value })} className="w-full bg-gray-700 p-2 rounded mt-1" placeholder="Instructions or due info" />
+            </label>
+            <label className="text-sm">
+              Schedule date
+              <input
+                type="date"
+                value={form.dueAt}
+                min={new Date().toISOString().slice(0,10)}
+                onChange={e=>setForm({ ...form, dueAt: e.target.value })}
+                className="w-full bg-gray-700 p-2 rounded mt-1"
+              />
             </label>
           </div>
           <div>
@@ -211,7 +306,7 @@ export default function Games() {
             <button onClick={sendAssignment} className="bg-indigo-600 px-4 py-2 rounded text-white disabled:opacity-50" disabled={!patients.length}>Assign game</button>
             {status && <div className="text-xs text-gray-300 self-center">{status}</div>}
           </div>
-          <div className="text-sm text-gray-400">Games are assigned via notifications; patients can launch games from the Games page.</div>
+          <div className="text-sm text-gray-400">Games are now scheduled: pick a date and patients will see them under Scheduled on their Games page.</div>
 
           <div className="mt-8 border-t border-gray-700 pt-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
@@ -265,33 +360,87 @@ export default function Games() {
     );
   }
 
+
   return (
     <main className="min-h-screen p-8 bg-gray-900 text-gray-100">
-      <div className="max-w-3xl mx-auto bg-gray-800 p-6 rounded shadow space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold">Games</h1>
-          <p className="text-gray-300">Your therapist assigns cognitive games when needed. You cannot start new games on your own.</p>
+      <div className="max-w-5xl mx-auto">
+        <div className="grid lg:grid-cols-3 gap-6">
+          <section className="lg:col-span-2 bg-gray-800 p-6 rounded shadow space-y-4">
+            <div>
+              <h1 className="text-2xl font-bold">Games</h1>
+              <p className="text-gray-300">Practice what you already have and see upcoming assignments. Scheduled games move over automatically on their date.</p>
+            </div>
+            {patientLoading ? (
+              <p className="text-gray-400 text-sm">Loading assigned games...</p>
+            ) : readyGames.length === 0 ? (
+              <p className="text-gray-400 text-sm">No games ready right now. Check Scheduled for what is coming up.</p>
+            ) : (
+              <ul className="space-y-3">
+                {readyGames.map((g) => {
+                  const dueAt = g.dueAt ? new Date(g.dueAt) : null;
+                  const completed = completionStatus(g);
+                  return (
+                    <li key={g._id} className="p-3 bg-gray-900 rounded flex items-center justify-between">
+                      <div>
+                        <div className="font-semibold text-white">{g.title}</div>
+                        <div className="text-xs text-gray-400">Game: {g.metadata?.gameKey || 'game'}</div>
+                        {g.description && <div className="text-xs text-gray-400 mt-1">{g.description}</div>}
+                        {dueAt && <div className="text-[11px] text-gray-500 mt-1">Scheduled for {dueAt.toLocaleDateString()} (now available)</div>}
+                        {completed?.completedToday && <div className="text-[11px] text-green-300 mt-1">Performed today</div>}
+                      </div>
+                      <button
+                        onClick={() => startGame(g)}
+                        disabled={!!completed?.completedToday}
+                        className={`px-3 py-1 rounded text-sm ${completed?.completedToday ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-indigo-600 text-white'}`}
+                      >
+                        {completed?.completedToday ? 'Completed' : 'Play'}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+          <aside className="bg-gray-800 p-6 rounded shadow space-y-3">
+            <div>
+              <h3 className="text-lg font-semibold">Scheduled</h3>
+              <p className="text-sm text-gray-400">New assignments appear here first. A live timer shows when they unlock.</p>
+            </div>
+            {patientLoading ? (
+              <p className="text-gray-400 text-sm">Loading scheduled games...</p>
+            ) : scheduledGames.length === 0 ? (
+              <p className="text-gray-400 text-sm">Nothing scheduled yet.</p>
+            ) : (
+              <ul className="space-y-3">
+                {scheduledGames.map((s) => {
+                  const dueLabel = s.dueAt ? new Date(s.dueAt).toLocaleString() : 'Scheduled';
+                  const countdown = countdownFor(s.dueAt);
+                  const disabled = !canStartGame(s);
+                  const completed = completionStatus(s);
+                  return (
+                    <li key={s._id || s.id} className="p-3 bg-gray-900 rounded border border-gray-700">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold">{s.title}</div>
+                          <div className="text-xs text-gray-400">Game: {s.metadata?.gameKey || 'game'}</div>
+                          <div className="text-xs text-gray-400 mt-1">Scheduled for {dueLabel}</div>
+                          <div className="text-[11px] text-indigo-300 mt-1">{completed?.completedToday ? 'Performed today' : `Starts in ${countdown}`}</div>
+                        </div>
+                        <button
+                          onClick={() => startGame(s)}
+                          disabled={disabled}
+                          className={`px-3 py-1 rounded text-sm ${disabled ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-indigo-600 text-white'}`}
+                        >
+                          {completed?.completedToday ? 'Completed' : disabled ? 'Locked' : 'Play'}
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </aside>
         </div>
-        {patientLoading ? (
-          <p className="text-gray-400 text-sm">Loading assigned games...</p>
-        ) : patientAssignments.length === 0 ? (
-          <p className="text-gray-400 text-sm">No games assigned yet. You’ll see them here once your therapist assigns one.</p>
-        ) : (
-          <ul className="space-y-3">
-            {patientAssignments.map((g) => (
-              <li key={g._id} className="p-3 bg-gray-900 rounded border border-gray-700">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="font-semibold text-white">{g.title}</div>
-                    <div className="text-xs text-gray-400">Game: {g.metadata?.gameKey || 'game'}</div>
-                    {g.description && <div className="text-xs text-gray-400 mt-1">{g.description}</div>}
-                  </div>
-                  <button onClick={()=>navigate(`/games/play/${g._id}`)} className="bg-indigo-600 px-3 py-1 rounded text-sm">Play</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
     </main>
   );

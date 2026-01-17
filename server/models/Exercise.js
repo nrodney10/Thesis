@@ -25,6 +25,10 @@ const ExerciseSchema = new mongoose.Schema({
   upcomingNotifiedAt: { type: Date }, // when an upcoming (advance) notice was sent
   dailyReminder: { type: Boolean, default: false }, // send daily reminder until completed
   lastDailyReminderDate: { type: Date }, // date (midnight) last reminder sent
+  completions: [{
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    completedAt: { type: Date, default: Date.now }
+  }],
   createdAt: { type: Date, default: Date.now }
 });
 

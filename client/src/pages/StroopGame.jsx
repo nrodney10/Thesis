@@ -41,10 +41,14 @@ export default function StroopGame({ assignmentId, assignmentTitle, gameKey = 's
   const finish = async (allTimes) => {
     const avg = Math.round(allTimes.reduce((a, b) => a + b, 0) / allTimes.length);
     const payload = { exerciseId: assignmentId || 'stroop', type: 'cognitive', score: score, metadata: { avgRTms: avg, trials: allTimes.length, gameKey } };
+    const markComplete = async () => {
+      if (!assignmentId) return;
+      try { await authFetch(`http://localhost:5000/api/exercises/${assignmentId}/complete`, { method: 'POST' }); } catch (_) {}
+    };
     try {
       const res = await authFetch('http://localhost:5000/api/results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await res.json();
-      if (data.success) push('Stroop result submitted', 'success');
+      if (data.success) { push('Stroop result submitted', 'success'); await markComplete(); }
       else push('Failed to submit Stroop result', 'error');
     } catch (err) {
       console.error(err);
@@ -85,7 +89,7 @@ export default function StroopGame({ assignmentId, assignmentTitle, gameKey = 's
             <button key={c} onClick={() => handleAnswer(c)} className="py-2 rounded" style={{ background: c, color: 'white' }}>{c}</button>
           ))}
         </div>
-        <div className="mt-4 text-sm text-gray-300">Trial: {trial+1}/15 — Score: {score}</div>
+        <div className="mt-4 text-sm text-gray-300">Trial: {trial+1}/15  Score: {score}</div>
       </div>
     </div>
   );

@@ -148,6 +148,11 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
       metadata: { difficulty, moves, timeSeconds: time, gameKey },
     };
 
+    const markComplete = async () => {
+      if (!assignmentId) return;
+      try { await authFetch(`http://localhost:5000/api/exercises/${assignmentId}/complete`, { method: 'POST' }); } catch (_) {}
+    };
+
     try {
       const res = await authFetch("http://localhost:5000/api/results", {
         method: "POST",
@@ -157,6 +162,7 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
       const data = await res.json();
       if (data.success) {
         push("Result submitted! Score: " + score, 'success');
+        await markComplete();
         if (onFinished) onFinished();
         else navigate('/patient');
       } else {
@@ -218,5 +224,4 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
     </div>
   );
 }
-
 

@@ -9,6 +9,7 @@ import { createNotification } from "../utils/createNotification.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 import { z } from "zod";
 import { validateBody } from "../middleware/validate.js";
+import { markCompletedForUser } from "../utils/markCompleted.js";
 
 const router = express.Router();
 
@@ -63,6 +64,8 @@ router.post("/", verifyToken, validateBody(payloadSchema), async (req, res) => {
       metadata,
     });
     await newResult.save();
+    // mark completed for assigned exercises/games to prevent replay
+    try { await markCompletedForUser(exerciseId, req.user.id); } catch (e) { console.warn('markCompletedForUser (json) failed', e?.message); }
     // Notify therapist of completion
     try {
       const patient = await User.findById(req.user.id).select('therapistId name');
@@ -106,6 +109,7 @@ router.post("/upload", verifyToken, upload.single('video'), async (req, res) => 
       metadata: fullMetadata,
     });
     await newResult.save();
+    try { await markCompletedForUser(exerciseId, req.user.id); } catch (e) { console.warn('markCompletedForUser (upload) failed', e?.message); }
     try {
       const patient = await User.findById(req.user.id).select('therapistId name');
       if (patient?.therapistId) {

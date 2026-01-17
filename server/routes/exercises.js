@@ -5,6 +5,7 @@ import { verifyToken } from '../middleware/authMiddleware.js';
 import User from '../models/User.js';
 import { notifyUsers } from '../utils/notify.js';
 import { createNotification } from '../utils/createNotification.js';
+import { markCompletedForUser } from '../utils/markCompleted.js';
 
 const router = express.Router();
 
@@ -168,6 +169,23 @@ router.post('/:id/start', verifyToken, async (req, res) => {
     }
     res.json({ success:true });
   } catch (e) { console.error('start exercise error', e); res.status(500).json({ success:false }); }
+});
+
+// Patient marks exercise/game completed (used to lock repeat play)
+router.post('/:id/complete', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'patient') return res.status(403).json({ success:false, error:'Forbidden' });
+    const { id } = req.params;
+    const ex = await Exercise.findById(id);
+    if (!ex) return res.status(404).json({ success:false, error:'Not found' });
+    if (!ex.assignedTo.map(String).includes(String(req.user.id))) return res.status(403).json({ success:false, error:'Not assigned to you' });
+    const r = await markCompletedForUser(id, req.user.id);
+    if (!r.ok) return res.status(500).json({ success:false, error:'Failed to mark completed' });
+    return res.json({ success:true });
+  } catch (e) {
+    console.error('complete exercise error', e);
+    res.status(500).json({ success:false, error:'Server error' });
+  }
 });
 
 // Patient skips exercise

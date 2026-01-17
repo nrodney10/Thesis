@@ -9,6 +9,7 @@ export default function ExerciseRunner() {
   const navigate = useNavigate();
   const loc = useLocation();
   const ex = loc.state?.exercise;
+  const { user } = useAuth();
 
   const [running, setRunning] = useState(false);
   const [timeLeft, setTimeLeft] = useState(60);
@@ -57,7 +58,33 @@ export default function ExerciseRunner() {
   const [heartRate, setHeartRate] = useState(null);
   const [fallbackHR, setFallbackHR] = useState(null);
   const [fitbitStatus, setFitbitStatus] = useState('unknown'); // unknown | connected | not-connected | error
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const lastSpeakRef = useRef({ t: 0, text: '' });
+
+  const countdownFor = (targetMs) => {
+    if (!Number.isFinite(targetMs)) return '';
+    const diff = targetMs - nowMs;
+    if (diff <= 0) return 'Ready now';
+    const totalSeconds = Math.floor(diff / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (days > 0) return `${days}d ${hours}h`;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const markComplete = useCallback(async () => {
+    try {
+      if (!ex || !ex._id) return;
+      await authFetch(`http://localhost:5000/api/exercises/${ex._id}/complete`, { method:'POST' });
+    } catch (e) { console.warn('markComplete failed', e); }
+  }, [authFetch, ex]);
 
   const speak = useCallback((text, opts = {}) => {
     try {
@@ -688,11 +715,11 @@ export default function ExerciseRunner() {
         fd.append('payload', JSON.stringify(payload));
         const res = await authFetch('http://localhost:5000/api/results/upload', { method: 'POST', body: fd });
         const data = await res.json();
-        if (data.success) push('Result uploaded', 'success'); else push('Upload failed', 'error');
+        if (data.success) { push('Result uploaded', 'success'); await markComplete(); } else push('Upload failed', 'error');
       } else {
         const res = await authFetch('http://localhost:5000/api/results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await res.json();
-        if (data.success) push('Result saved', 'success'); else push('Failed to save result', 'error');
+        if (data.success) { push('Result saved', 'success'); await markComplete(); } else push('Failed to save result', 'error');
       }
     } catch (err) {
       console.error('Submit result error', err);
@@ -702,6 +729,22 @@ export default function ExerciseRunner() {
   };
 
   if (!ex) return <main className="min-h-screen p-8 bg-gray-900 text-gray-100"><div className="max-w-2xl mx-auto">No exercise selected</div></main>;
+
+  const lockedUntil = ex?.dueAt ? new Date(ex.dueAt).getTime() : NaN;
+  const locked = Number.isFinite(lockedUntil) && lockedUntil > nowMs;
+  if (locked) {
+    const countdown = countdownFor(lockedUntil);
+    return (
+      <main className="min-h-screen p-8 bg-gray-900 text-gray-100">
+        <div className="max-w-2xl mx-auto bg-gray-800 p-6 rounded shadow text-center">
+          <div className="text-xl font-semibold mb-2">Scheduled exercise</div>
+          <div className="text-sm text-gray-300 mb-2">This exercise unlocks on {new Date(lockedUntil).toLocaleString()}.</div>
+          <div className="text-xs text-indigo-300 mb-4">Starts in {countdown}</div>
+          <button onClick={()=>navigate('/exercises')} className="bg-indigo-600 px-4 py-2 rounded text-white">Back to Exercises</button>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen h-screen bg-gray-900 text-gray-100">

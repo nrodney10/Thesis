@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
@@ -15,6 +15,8 @@ export default function Exercises() {
   const [assign, setAssign] = useState({ templateId: '', assignedTo: new Set(), overrides: { title: '', description: '', poseConfig: {}, metadata: {} }, dueAt: '', dailyReminder: false });
   const [autoAlloc, setAutoAlloc] = useState({ patientId: '', status: '', vulnerabilities: '' });
   const [lastMatches, setLastMatches] = useState([]);
+  const [now, setNow] = useState(() => new Date());
+  const userId = user?.id || user?._id;
   
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [selectedExerciseIds, setSelectedExerciseIds] = useState(new Set());
@@ -88,6 +90,17 @@ export default function Exercises() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role]);
 
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const startOfToday = useMemo(() => {
+    const d = new Date(now);
+    d.setHours(0,0,0,0);
+    return d;
+  }, [now]);
+
   const sanitizePoseConfig = (cfg = {}) => {
     const copy = JSON.parse(JSON.stringify(cfg));
     if (copy.upAngle === '' || copy.upAngle === null) delete copy.upAngle;
@@ -108,6 +121,10 @@ export default function Exercises() {
 
   const instantiate = async () => {
     if (!assign.templateId) return push('Pick a template', 'error');
+    if (!assign.dueAt) return push('Pick a schedule date', 'error');
+    const d = new Date(assign.dueAt);
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (d < today) return push('Cannot schedule on a past date', 'error');
     try {
       const cleanedOverrides = { ...assign.overrides };
       if (cleanedOverrides.poseConfig) cleanedOverrides.poseConfig = sanitizePoseConfig(cleanedOverrides.poseConfig);
@@ -115,8 +132,7 @@ export default function Exercises() {
       if (cleanedOverrides.metadata && typeof cleanedOverrides.metadata.vulnerabilityTags === 'string') {
         cleanedOverrides.metadata.vulnerabilityTags = cleanedOverrides.metadata.vulnerabilityTags.split(',').map(s=>s.trim()).filter(Boolean);
       }
-      const body = { assignedTo: Array.from(assign.assignedTo), overrides: cleanedOverrides };
-      if (assign.dueAt) body.dueAt = assign.dueAt;
+      const body = { assignedTo: Array.from(assign.assignedTo), overrides: cleanedOverrides, dueAt: assign.dueAt };
       if (assign.dailyReminder) body.dailyReminder = assign.dailyReminder;
       const res = await authFetch(`http://localhost:5000/api/templates/${assign.templateId}/instantiate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json();
@@ -177,9 +193,45 @@ export default function Exercises() {
 
   const filteredExercises = exercises.filter((ex) => (ex.metadata?.assignmentType || 'exercise') !== 'game');
 
+  const completionStatus = (item) => {
+    if (!userId) return null;
+    const entry = (item?.completions || []).find((c) => String(c.userId) === String(userId));
+    if (!entry) return null;
+    const completedAt = entry.completedAt ? new Date(entry.completedAt) : null;
+    if (!completedAt || Number.isNaN(completedAt.getTime())) return null;
+    const completedToday = completedAt >= startOfToday;
+    return { completedAt, completedToday };
+  };
+
   const patientExercises = selectedPatientId
     ? filteredExercises.filter((ex) => isAssignedToPatient(ex, selectedPatientId))
     : [];
+
+  const visiblePatientExercises = useMemo(() => {
+    return filteredExercises.filter((ex) => {
+      const status = completionStatus(ex);
+      if (!status) return true;
+      return status.completedAt >= startOfToday;
+    });
+  }, [filteredExercises, startOfToday]);
+
+  const splitPatientExercises = useMemo(() => {
+    const ready = [];
+    const scheduled = [];
+    visiblePatientExercises.forEach((ex) => {
+      const dueMs = ex?.dueAt ? new Date(ex.dueAt).getTime() : NaN;
+      if (Number.isFinite(dueMs)) scheduled.push(ex); else ready.push(ex);
+    });
+    scheduled.sort((a, b) => {
+      const aMs = a?.dueAt ? new Date(a.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
+      const bMs = b?.dueAt ? new Date(b.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
+      return aMs - bMs;
+    });
+    return { readyExercises: ready, scheduledExercises: scheduled };
+  }, [visiblePatientExercises]);
+
+  const patientReadyExercises = splitPatientExercises.readyExercises;
+  const patientScheduledExercises = splitPatientExercises.scheduledExercises;
 
   const toggleSelection = (exerciseId) => {
     setSelectedExerciseIds((prev) => {
@@ -248,7 +300,7 @@ export default function Exercises() {
                           </select>
                         </label>
                         <label className="text-sm">Due date
-                          <input type="date" value={scheduleForm.dueAt||''} onChange={e=>setScheduleForm({...scheduleForm, dueAt:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                          <input type="date" min={new Date().toISOString().slice(0,10)} value={scheduleForm.dueAt||''} onChange={e=>setScheduleForm({...scheduleForm, dueAt:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
                         </label>
                       </div>
                       {scheduleForm.mode === 'template' ? (
@@ -316,11 +368,10 @@ export default function Exercises() {
   const createActivityForPatientFromTemplate = async () => {
     if (!selectedPatientId) return push('Select a patient', 'error');
     if (!scheduleForm.templateId) return push('Select a template', 'error');
-    if (scheduleForm.dueAt) {
-      const d = new Date(scheduleForm.dueAt);
-      const today = new Date(); today.setHours(0,0,0,0);
-      if (d < today) return push('Cannot schedule on a past date', 'error');
-    }
+    if (!scheduleForm.dueAt) return push('Pick a due date', 'error');
+    const d = new Date(scheduleForm.dueAt);
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (d < today) return push('Cannot schedule on a past date', 'error');
     try {
       const body = { assignedTo: [selectedPatientId], overrides: { title: scheduleForm.title || undefined, description: scheduleForm.description || undefined }, dueAt: scheduleForm.dueAt || undefined, dailyReminder: !!scheduleForm.dailyReminder };
       const res = await authFetch(`http://localhost:5000/api/templates/${scheduleForm.templateId}/instantiate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -338,11 +389,10 @@ export default function Exercises() {
   const createCustomActivityForPatient = async () => {
     if (!selectedPatientId) return push('Select a patient', 'error');
     if (!scheduleForm.title || scheduleForm.title.length < 3) return push('Provide a title', 'error');
-    if (scheduleForm.dueAt) {
-      const d = new Date(scheduleForm.dueAt);
-      const today = new Date(); today.setHours(0,0,0,0);
-      if (d < today) return push('Cannot schedule on a past date', 'error');
-    }
+    if (!scheduleForm.dueAt) return push('Pick a due date', 'error');
+    const d = new Date(scheduleForm.dueAt);
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (d < today) return push('Cannot schedule on a past date', 'error');
     try {
       const body = { title: scheduleForm.title, description: scheduleForm.description, assignedTo: [selectedPatientId], dueAt: scheduleForm.dueAt || undefined, dailyReminder: !!scheduleForm.dailyReminder, metadata: { assignmentType: scheduleForm.assignmentType } };
       const res = await authFetch('http://localhost:5000/api/exercises', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -358,6 +408,36 @@ export default function Exercises() {
   };
 
   
+  const canStartExercise = (ex) => {
+    const dueMs = ex?.dueAt ? new Date(ex.dueAt).getTime() : NaN;
+    if (Number.isFinite(dueMs) && dueMs > now.getTime()) return false;
+    const completed = completionStatus(ex);
+    if (completed?.completedToday) return false;
+    return true;
+  };
+
+  const countdownFor = (dueAt) => {
+    if (!dueAt) return '';
+    const dueMs = new Date(dueAt).getTime();
+    if (!Number.isFinite(dueMs)) return '';
+    const diff = dueMs - now.getTime();
+    if (diff <= 0) return 'Ready now';
+    const totalSeconds = Math.floor(diff / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (days > 0) return `${days}d ${hours}h`;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  const startExercise = (ex) => {
+    if (!canStartExercise(ex)) {
+      push(`This exercise unlocks on ${ex.dueAt ? new Date(ex.dueAt).toLocaleString() : 'its scheduled date'}`, 'info');
+      return;
+    }
+    navigate('/exercises/run', { state: { exercise: ex } });
+  };
 
   // Therapist view: assign and manage exercises/games
   if (user?.role === 'therapist') {
@@ -476,7 +556,7 @@ export default function Exercises() {
             <div className="flex items-center gap-3 mt-3">
               <label className="text-sm flex items-center gap-2">
                 Due date
-                <input type="date" value={assign.dueAt || ''} onChange={(e)=>setAssign({...assign, dueAt: e.target.value})} className="p-2 bg-gray-700 rounded" />
+                <input type="date" min={new Date().toISOString().slice(0,10)} value={assign.dueAt || ''} onChange={(e)=>setAssign({...assign, dueAt: e.target.value})} className="p-2 bg-gray-700 rounded" />
               </label>
               <label className="text-sm flex items-center gap-2">
                 <input type="checkbox" checked={!!assign.dailyReminder} onChange={(e)=>setAssign({...assign, dailyReminder: e.target.checked})} /> Daily reminder
@@ -609,31 +689,88 @@ export default function Exercises() {
     );
   }
 
-  // Patient view: list assigned exercises (read-only)
+  // Patient view: practice plus scheduled assignments
   return (
     <main role="main" className="min-h-screen p-8 bg-gray-900 text-gray-100">
-      <div className="max-w-3xl mx-auto bg-gray-800 p-6 rounded shadow">
-        <h1 className="text-2xl font-bold mb-2">Exercises</h1>
-        <p className="text-gray-300 mb-4">Exercises assigned to you by your therapist. Complete them and your progress will be tracked here.</p>
-        {loading ? <p>Loading...</p> : filteredExercises.length === 0 ? (
-          <p className="text-gray-400">No exercises assigned yet.</p>
-        ) : (
-          <ul className="space-y-3">
-            {filteredExercises.map((ex) => (
-              <li key={ex._id} className="p-3 bg-gray-900 rounded">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <div className="font-medium text-white">{ex.title}</div>
-                    <div className="text-xs text-gray-400">{ex.description}</div>
-                  </div>
-                  <div className="text-sm">
-                    <button onClick={() => navigate('/exercises/run', { state: { exercise: ex } })} className="bg-indigo-600 px-3 py-1 rounded text-white">Start</button>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+      <div className="max-w-5xl mx-auto">
+        <div className="grid lg:grid-cols-3 gap-6">
+          <section className="lg:col-span-2 bg-gray-800 p-6 rounded shadow space-y-4">
+            <div>
+              <h1 className="text-2xl font-bold mb-2">Exercises</h1>
+              <p className="text-gray-300 mb-2">Practice exercises assigned to you. New assignments stay under Scheduled until their date.</p>
+            </div>
+            {loading ? (
+              <p className="text-gray-400">Loading...</p>
+            ) : patientReadyExercises.length === 0 ? (
+              <p className="text-gray-400">No exercises ready right now. Check Scheduled for upcoming ones.</p>
+            ) : (
+              <ul className="space-y-3">
+                {patientReadyExercises.map((ex) => {
+                  const dueAt = ex.dueAt ? new Date(ex.dueAt) : null;
+                  const completed = completionStatus(ex);
+                  return (
+                    <li key={ex._id} className="p-3 bg-gray-900 rounded flex items-center justify-between">
+                      <div>
+                        <div className="font-medium text-white">{ex.title}</div>
+                        <div className="text-xs text-gray-400">{ex.description}</div>
+                        {dueAt && <div className="text-[11px] text-gray-500 mt-1">Scheduled for {dueAt.toLocaleDateString()} (now available)</div>}
+                        {completed?.completedToday && <div className="text-[11px] text-green-300 mt-1">Performed today</div>}
+                      </div>
+                      <div className="text-sm">
+                        <button
+                          onClick={() => startExercise(ex)}
+                          disabled={!!completed?.completedToday}
+                          className={`px-3 py-1 rounded text-white ${completed?.completedToday ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-indigo-600'}`}
+                        >
+                          {completed?.completedToday ? 'Completed' : 'Start'}
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+          <aside className="bg-gray-800 p-6 rounded shadow space-y-3">
+            <div>
+              <h3 className="text-lg font-semibold">Scheduled</h3>
+              <p className="text-sm text-gray-400">Upcoming exercises appear here with a live countdown.</p>
+            </div>
+            {loading ? (
+              <p className="text-gray-400 text-sm">Loading scheduled exercises...</p>
+            ) : patientScheduledExercises.length === 0 ? (
+              <p className="text-gray-400 text-sm">Nothing scheduled yet.</p>
+            ) : (
+              <ul className="space-y-3">
+                {patientScheduledExercises.map((ex) => {
+                  const dueLabel = ex.dueAt ? new Date(ex.dueAt).toLocaleString() : 'Scheduled';
+                  const countdown = countdownFor(ex.dueAt);
+                  const disabled = !canStartExercise(ex);
+                  const completed = completionStatus(ex);
+                  return (
+                    <li key={ex._id} className="p-3 bg-gray-900 rounded border border-gray-700">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold">{ex.title}</div>
+                          <div className="text-xs text-gray-400">{ex.description}</div>
+                          <div className="text-xs text-gray-400 mt-1">Scheduled for {dueLabel}</div>
+                          <div className="text-[11px] text-indigo-300 mt-1">{completed?.completedToday ? 'Performed today' : `Starts in ${countdown}`}</div>
+                        </div>
+                        <button
+                          onClick={() => startExercise(ex)}
+                          disabled={disabled}
+                          className={`px-3 py-1 rounded text-sm ${disabled ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-indigo-600 text-white'}`}
+                        >
+                          {completed?.completedToday ? 'Completed' : disabled ? 'Locked' : 'Start'}
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </aside>
+        </div>
       </div>
     </main>
   );
