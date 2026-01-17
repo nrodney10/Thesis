@@ -121,10 +121,10 @@ export default function Exercises() {
 
   const instantiate = async () => {
     if (!assign.templateId) return push('Pick a template', 'error');
-    if (!assign.dueAt) return push('Pick a schedule date and time', 'error');
+    if (!assign.dueAt) return push('Pick a schedule date', 'error');
     const d = new Date(assign.dueAt);
-    const now = new Date();
-    if (d < now) return push('Cannot schedule in the past', 'error');
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (d < today) return push('Cannot schedule on a past date', 'error');
     try {
       const cleanedOverrides = { ...assign.overrides };
       if (cleanedOverrides.poseConfig) cleanedOverrides.poseConfig = sanitizePoseConfig(cleanedOverrides.poseConfig);
@@ -143,43 +143,10 @@ export default function Exercises() {
       } else {
         console.error('Instantiate error', data);
         const msg = data.error || data.message || JSON.stringify(data);
-        if (String(msg).toLowerCase().includes('already assigned')) {
-          push('Failed to create: one or more selected patients already have an assignment from this template. Deselect them and try again.', 'error');
-        } else {
-          push(`Failed to create from template: ${msg}`, 'error');
-        }
+        push(`Failed to create from template: ${msg}`, 'error');
       }
     } catch (e) { console.error(e); push('Error creating from template', 'error'); }
   };
-
-  // compute patients already assigned from selected template to prevent duplicate assignments
-  const patientsAlreadyFromTemplate = useMemo(() => {
-    if (!assign.templateId) return new Set();
-    const s = new Set();
-    (exercises || []).forEach(ex => {
-      if (!ex.templateId) return;
-      try {
-        if (String(ex.templateId) === String(assign.templateId)) {
-          (ex.assignedTo || []).forEach(uid => {
-            const id = uid && typeof uid === 'object' && uid._id ? String(uid._id) : String(uid);
-            if (id) s.add(id);
-          });
-        }
-      } catch (e) { /* ignore */ }
-    });
-    return s;
-  }, [assign.templateId, exercises]);
-
-  // when template changes, remove any already-assigned patients from the selection
-  useEffect(() => {
-    if (!assign.templateId) return; // nothing to do
-    setAssign(prev => {
-      const nextAssigned = new Set([...prev.assignedTo].filter(id => !patientsAlreadyFromTemplate.has(String(id))));
-      if (nextAssigned.size === prev.assignedTo.size) return prev;
-      return { ...prev, assignedTo: nextAssigned };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assign.templateId, patientsAlreadyFromTemplate]);
 
   const runAutoAllocate = async () => {
     if (!autoAlloc.patientId) return push('Pick a patient to auto-allocate', 'error');
@@ -266,29 +233,6 @@ export default function Exercises() {
   const patientReadyExercises = splitPatientExercises.readyExercises;
   const patientScheduledExercises = splitPatientExercises.scheduledExercises;
 
-  // hide scheduled items that have already been performed today
-  const patientScheduledVisible = patientScheduledExercises.filter((ex) => {
-    const comp = completionStatus(ex);
-    return !comp?.completedToday;
-  });
-
-  const groupedExistingExercises = useMemo(() => {
-    const map = new Map();
-    filteredExercises.forEach((ex) => {
-      const assignees = formatAssignees(ex.assignedTo);
-      const type = (ex.metadata?.assignmentType || 'exercise').toLowerCase();
-      const key = `${type}|${ex.title}|${assignees}`;
-      if (!map.has(key)) {
-        map.set(key, { ...ex, assigneesLabel: assignees, count: 1 });
-      } else {
-        const cur = map.get(key);
-        cur.count += 1;
-        map.set(key, cur);
-      }
-    });
-    return Array.from(map.values());
-  }, [filteredExercises, patients]);
-
   const toggleSelection = (exerciseId) => {
     setSelectedExerciseIds((prev) => {
       const next = new Set(prev);
@@ -355,9 +299,9 @@ export default function Exercises() {
                             <option value="custom">Custom</option>
                           </select>
                         </label>
-                                <label className="text-sm">Due date & time
-                                    <input type="datetime-local" min={new Date().toISOString().slice(0,16)} value={scheduleForm.dueAt||''} onChange={e=>setScheduleForm({...scheduleForm, dueAt:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
-                                  </label>
+                        <label className="text-sm">Due date
+                          <input type="date" min={new Date().toISOString().slice(0,10)} value={scheduleForm.dueAt||''} onChange={e=>setScheduleForm({...scheduleForm, dueAt:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                        </label>
                       </div>
                       {scheduleForm.mode === 'template' ? (
                         <div className="mt-2">
@@ -408,28 +352,26 @@ export default function Exercises() {
 
   const patientName = (id) => patients.find((p) => p._id === id)?.name || 'selected patient';
 
-  // Use function declaration so it is available before groupedExistingExercises memo
-  function formatAssignees(assignedTo = []) {
+  const formatAssignees = (assignedTo = []) => {
     if (!assignedTo.length) return 'Unassigned';
     const names = assignedTo.map((uid) => {
       const id = uid && typeof uid === 'object' && uid._id ? String(uid._id) : String(uid);
       return patients.find((p) => p._id === id)?.name || 'Unknown';
     });
     return names.join(', ');
-  }
+  };
 
   // Schedule helpers for therapist viewing/adding activities per patient
   const [showAddActivity, setShowAddActivity] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({ mode: 'template', templateId: '', title: '', description: '', dueAt: '', dailyReminder: false, assignmentType: 'exercise' });
-  const [showAllExisting, setShowAllExisting] = useState(false);
 
   const createActivityForPatientFromTemplate = async () => {
     if (!selectedPatientId) return push('Select a patient', 'error');
     if (!scheduleForm.templateId) return push('Select a template', 'error');
-    if (!scheduleForm.dueAt) return push('Pick a due date and time', 'error');
+    if (!scheduleForm.dueAt) return push('Pick a due date', 'error');
     const d = new Date(scheduleForm.dueAt);
-    const now = new Date();
-    if (d < now) return push('Cannot schedule in the past', 'error');
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (d < today) return push('Cannot schedule on a past date', 'error');
     try {
       const body = { assignedTo: [selectedPatientId], overrides: { title: scheduleForm.title || undefined, description: scheduleForm.description || undefined }, dueAt: scheduleForm.dueAt || undefined, dailyReminder: !!scheduleForm.dailyReminder };
       const res = await authFetch(`http://localhost:5000/api/templates/${scheduleForm.templateId}/instantiate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -439,9 +381,7 @@ export default function Exercises() {
         setShowAddActivity(false);
         fetchExercises();
       } else {
-        const msg = data.error || '';
-        if (String(msg).toLowerCase().includes('already assigned')) push('Failed to create: patient already has an assignment from this template', 'error');
-        else push(data.error || 'Failed to create scheduled activity', 'error');
+        push(data.error || 'Failed to create scheduled activity', 'error');
       }
     } catch (e) { console.error(e); push('Failed to create scheduled activity', 'error'); }
   };
@@ -449,10 +389,10 @@ export default function Exercises() {
   const createCustomActivityForPatient = async () => {
     if (!selectedPatientId) return push('Select a patient', 'error');
     if (!scheduleForm.title || scheduleForm.title.length < 3) return push('Provide a title', 'error');
-    if (!scheduleForm.dueAt) return push('Pick a due date and time', 'error');
+    if (!scheduleForm.dueAt) return push('Pick a due date', 'error');
     const d = new Date(scheduleForm.dueAt);
-    const now = new Date();
-    if (d < now) return push('Cannot schedule in the past', 'error');
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (d < today) return push('Cannot schedule on a past date', 'error');
     try {
       const body = { title: scheduleForm.title, description: scheduleForm.description, assignedTo: [selectedPatientId], dueAt: scheduleForm.dueAt || undefined, dailyReminder: !!scheduleForm.dailyReminder, metadata: { assignmentType: scheduleForm.assignmentType } };
       const res = await authFetch('http://localhost:5000/api/exercises', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -501,8 +441,6 @@ export default function Exercises() {
 
   // Therapist view: assign and manage exercises/games
   if (user?.role === 'therapist') {
-    const visibleExisting = showAllExisting ? groupedExistingExercises : groupedExistingExercises.slice(0, 6);
-    const hiddenExistingCount = Math.max(0, groupedExistingExercises.length - visibleExisting.length);
     return (
       <main role="main" className="min-h-screen p-8 bg-gray-900 text-gray-100">
         <div className="max-w-3xl mx-auto bg-gray-800 p-6 rounded shadow">
@@ -617,8 +555,8 @@ export default function Exercises() {
             </div>
             <div className="flex items-center gap-3 mt-3">
               <label className="text-sm flex items-center gap-2">
-                Due date & time
-                <input type="datetime-local" min={new Date().toISOString().slice(0,16)} value={assign.dueAt || ''} onChange={(e)=>setAssign({...assign, dueAt: e.target.value})} className="p-2 bg-gray-700 rounded" />
+                Due date
+                <input type="date" min={new Date().toISOString().slice(0,10)} value={assign.dueAt || ''} onChange={(e)=>setAssign({...assign, dueAt: e.target.value})} className="p-2 bg-gray-700 rounded" />
               </label>
               <label className="text-sm flex items-center gap-2">
                 <input type="checkbox" checked={!!assign.dailyReminder} onChange={(e)=>setAssign({...assign, dailyReminder: e.target.checked})} /> Daily reminder
@@ -627,23 +565,16 @@ export default function Exercises() {
             <div className="mt-3">
               <div className="text-sm text-gray-300 mb-1">Assign to patients</div>
               <div className="max-h-32 overflow-auto bg-gray-800 p-2 rounded">
-                {patients.map(p => {
-                  const already = patientsAlreadyFromTemplate.has(String(p._id));
-                  return (
-                    <label key={p._id} className="flex items-center gap-2 p-1 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={assign.assignedTo.has(p._id)}
-                        onChange={e=>{
-                          const s = new Set(assign.assignedTo);
-                          if (e.target.checked) s.add(p._id); else s.delete(p._id);
-                          setAssign({ ...assign, assignedTo: s });
-                        }}
-                      />
-                      <span>{p.name} ({p.email || 'no email'}) {already && <span className="text-xs text-yellow-300 ml-2">(already assigned)</span>}</span>
-                    </label>
-                  );
-                })}
+                {patients.map(p => (
+                  <label key={p._id} className="flex items-center gap-2 p-1 text-sm">
+                    <input type="checkbox" checked={assign.assignedTo.has(p._id)} onChange={e=>{
+                      const s = new Set(assign.assignedTo);
+                      if (e.target.checked) s.add(p._id); else s.delete(p._id);
+                      setAssign({ ...assign, assignedTo: s });
+                    }} />
+                    <span>{p.name} ({p.email || 'no email'})</span>
+                  </label>
+                ))}
                 {patients.length === 0 && <div className="text-xs text-gray-400">No patients yet.</div>}
               </div>
             </div>
@@ -741,28 +672,16 @@ export default function Exercises() {
           </div>
           <div>
             <h2 className="text-lg font-semibold mb-2">Existing assignments</h2>
-            {loading ? <p>Loading...</p> : groupedExistingExercises.length === 0 ? <p className="text-gray-400">No assignments yet.</p> : (
-              <div className="space-y-2">
-                <ul className="space-y-2">
-                  {visibleExisting.map((ex, idx) => (
-                    <li key={`${ex._id || ex.title}-${idx}`} className="p-2 bg-gray-900 rounded">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="font-medium">{ex.title}</div>
-                          <div className="text-xs text-gray-400">{ex.description}</div>
-                          <div className="text-xs text-gray-500 mt-1">Assigned to: {ex.assigneesLabel}</div>
-                        </div>
-                        {ex.count > 1 && <div className="text-[11px] bg-gray-800 px-2 py-1 rounded text-gray-200">x{ex.count}</div>}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                {hiddenExistingCount > 0 && (
-                  <button onClick={()=>setShowAllExisting(s=>!s)} className="text-xs text-indigo-300 underline">
-                    {showAllExisting ? 'Show less' : `Show ${hiddenExistingCount} more`}
-                  </button>
-                )}
-              </div>
+            {loading ? <p>Loading...</p> : filteredExercises.length === 0 ? <p className="text-gray-400">No assignments yet.</p> : (
+              <ul className="space-y-2">
+                {filteredExercises.map((ex) => (
+                  <li key={ex._id} className="p-2 bg-gray-900 rounded">
+                    <div className="font-medium">{ex.title}</div>
+                    <div className="text-xs text-gray-400">{ex.description}</div>
+                    <div className="text-xs text-gray-500 mt-1">Assigned to: {formatAssignees(ex.assignedTo)}</div>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         </div>
@@ -819,11 +738,11 @@ export default function Exercises() {
             </div>
             {loading ? (
               <p className="text-gray-400 text-sm">Loading scheduled exercises...</p>
-            ) : patientScheduledVisible.length === 0 ? (
+            ) : patientScheduledExercises.length === 0 ? (
               <p className="text-gray-400 text-sm">Nothing scheduled yet.</p>
             ) : (
               <ul className="space-y-3">
-                {patientScheduledVisible.map((ex) => {
+                {patientScheduledExercises.map((ex) => {
                   const dueLabel = ex.dueAt ? new Date(ex.dueAt).toLocaleString() : 'Scheduled';
                   const countdown = countdownFor(ex.dueAt);
                   const disabled = !canStartExercise(ex);
