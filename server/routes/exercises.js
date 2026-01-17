@@ -68,7 +68,8 @@ router.post('/', verifyToken, async (req, res) => {
     if (!meta.assignmentType) meta.assignmentType = 'exercise';
 
     // avoid duplicate assignments of same type/title to same patient (games and exercises)
-    if (validAssigned.length) {
+    // allow scheduling a new dated assignment even if a practice (undated) exists
+    if (validAssigned.length && !dueAt) {
       const assignType = meta.assignmentType || 'exercise';
       const dup = await Exercise.findOne({
         createdBy: req.user.id,

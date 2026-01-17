@@ -140,6 +140,7 @@ export default function TherapistCalendar() {
                   <button onClick={async ()=>{
                     if (!selectedPatient) return alert('Select a patient first');
                     if (!scheduleForm.templateId) return alert('Pick a template');
+                    if (!scheduleForm.dueAt) return alert('Pick a due date for the schedule');
                     // validate due date not in past
                     if (scheduleForm.dueAt) {
                       const d = new Date(scheduleForm.dueAt);
@@ -179,6 +180,7 @@ export default function TherapistCalendar() {
                   <button onClick={async ()=>{
                     if (!selectedPatient) return alert('Select a patient first');
                     if (!scheduleForm.existingId) return alert('Pick an existing item');
+                    if (!scheduleForm.dueAt) return alert('Pick a due date for the schedule');
                     if (scheduleForm.dueAt) {
                       const d = new Date(scheduleForm.dueAt);
                       const today = new Date(); today.setHours(0,0,0,0);
@@ -216,6 +218,7 @@ export default function TherapistCalendar() {
                   <button onClick={async ()=>{
                     if (!selectedPatient) return alert('Select a patient first');
                     if (!scheduleForm.title) return alert('Provide title');
+                    if (!scheduleForm.dueAt) return alert('Pick a due date for the schedule');
                     if (scheduleForm.dueAt) {
                       const d = new Date(scheduleForm.dueAt);
                       const today = new Date(); today.setHours(0,0,0,0);

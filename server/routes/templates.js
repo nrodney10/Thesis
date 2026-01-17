@@ -189,12 +189,16 @@ router.post('/:id/instantiate', verifyToken, async (req, res) => {
     }
 
     // avoid duplicate assignment of same template to same patient
-    const dupExists = await Exercise.findOne({
-      templateId: tpl._id,
-      assignedTo: { $in: validAssigned },
-      createdBy: req.user.id
-    });
-    if (dupExists) return res.status(400).json({ success:false, error:'Already assigned from this template to this patient' });
+    // Allow a scheduled instance even if a prior practice (undated) exists; block duplicates only when no due date provided
+    if (!dueAt) {
+      const dupExists = await Exercise.findOne({
+        templateId: tpl._id,
+        assignedTo: { $in: validAssigned },
+        createdBy: req.user.id,
+        $or: [ { dueAt: { $exists: false } }, { dueAt: null } ]
+      });
+      if (dupExists) return res.status(400).json({ success:false, error:'Already assigned from this template to this patient' });
+    }
 
     // merge with overrides (shallow for simplicity)
     const exerciseDoc = new Exercise({

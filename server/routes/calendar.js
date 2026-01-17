@@ -18,7 +18,11 @@ router.get('/patient', verifyToken, async (req, res) => {
         { dailyReminder: true }
       ]
     }).populate('createdBy', 'name').limit(200);
-    const mapped = items.map(ex => ({
+    const filtered = items.filter((ex) => {
+      const completions = ex.completions || [];
+      return !completions.find((c) => String(c.userId) === String(req.user.id));
+    });
+    const mapped = filtered.map(ex => ({
       id: ex._id,
       title: ex.title,
       description: ex.description,
@@ -47,7 +51,15 @@ router.get('/therapist', verifyToken, async (req, res) => {
         { dailyReminder: true }
       ]
     }).populate('assignedTo', 'name email').limit(400);
-    const mapped = items.map(ex => ({
+    const mapped = items
+      .filter((ex) => {
+        const completions = ex.completions || [];
+        if (!Array.isArray(ex.assignedTo) || ex.assignedTo.length === 0) return true;
+        // keep if any assignee has NOT completed; drop only when all have completed
+        const allCompleted = ex.assignedTo.every((p) => completions.find((c) => String(c.userId) === String(p._id)));
+        return !allCompleted;
+      })
+      .map(ex => ({
       id: ex._id,
       title: ex.title,
       description: ex.description,
@@ -81,7 +93,11 @@ router.get('/patient/:id', verifyToken, async (req, res) => {
       createdBy: req.user.id,
       $or: [ { dueAt: { $gte: now, $lte: in30 } }, { dailyReminder: true } ]
     }).populate('createdBy', 'name').limit(200);
-    const mapped = items.map(ex => ({ id: ex._id, title: ex.title, description: ex.description, dueAt: ex.dueAt, dailyReminder: ex.dailyReminder, createdBy: ex.createdBy, type: 'exercise' }));
+    const filtered = items.filter((ex) => {
+      const completions = ex.completions || [];
+      return !completions.find((c) => String(c.userId) === String(patient._id));
+    });
+    const mapped = filtered.map(ex => ({ id: ex._id, title: ex.title, description: ex.description, dueAt: ex.dueAt, dailyReminder: ex.dailyReminder, createdBy: ex.createdBy, type: 'exercise' }));
     res.json({ success:true, items: mapped });
   } catch (e) {
     console.error('calendar patient/:id error', e);

@@ -200,9 +200,7 @@ export default function PatientDashboard() {
                           const filtered = results.filter(r => r.createdAt && new Date(r.createdAt).toISOString().slice(0,10) === day && (r.type === 'exercise' || r.type === 'physical'));
                           if (filtered.length === 0) return (<div>No exercises on {day}.</div>);
                           const avg = Math.round((filtered.reduce((s, r) => s + (r.score || 0), 0) / filtered.length) || 0);
-                          return (<div>Items: {filtered.length} • Avg: {avg}
-                            <div className="mt-2">{filtered.map(fr => (<div key={fr._id} className="text-xs text-gray-200"><span className="font-semibold">{fr.title || fr.type}</span><span className="ml-2">{fr.score ?? '--'} pts</span><span className="ml-2 text-gray-400">{new Date(fr.createdAt).toLocaleTimeString()}</span></div>))}</div>
-                          </div>);
+                          return (<div>Items: {filtered.length} • Avg: {avg}</div>);
                         })()}
                       </div>
                     </div>
@@ -221,9 +219,7 @@ export default function PatientDashboard() {
                           const filtered = results.filter(r => r.createdAt && new Date(r.createdAt).toISOString().slice(0,10) === day && (r.type === 'game' || r.type === 'cognitive'));
                           if (filtered.length === 0) return (<div>No cognitive games on {day}.</div>);
                           const avg = Math.round((filtered.reduce((s, r) => s + (r.score || 0), 0) / filtered.length) || 0);
-                          return (<div>Items: {filtered.length} • Avg: {avg}
-                            <div className="mt-2">{filtered.map(fr => (<div key={fr._id} className="text-xs text-gray-200"><span className="font-semibold">{fr.title || fr.type}</span><span className="ml-2">{fr.score ?? '--'} pts</span><span className="ml-2 text-gray-400">{new Date(fr.createdAt).toLocaleTimeString()}</span></div>))}</div>
-                          </div>);
+                          return (<div>Items: {filtered.length} • Avg: {avg}</div>);
                         })()}
                       </div>
                     </div>
