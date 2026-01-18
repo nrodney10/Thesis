@@ -58,8 +58,11 @@ const Login = () => {
     <div className="min-h-screen flex items-center justify-center bg-gray-900">
       <div className="w-full max-w-md p-8">
         <div className="text-center mb-6">
-          <div className="mx-auto w-20 h-20 rounded-full bg-gradient-to-br from-indigo-700 to-purple-600 flex items-center justify-center text-white text-3xl">
-          </div>
+          <img
+            src="/rodrecover-logo.png"
+            alt="RodRecover"
+            className="mx-auto w-48 max-w-full h-auto object-contain"
+          />
           <h1 className="text-4xl font-semibold text-white mt-4">User Login</h1>
         </div>
 

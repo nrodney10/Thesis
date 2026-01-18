@@ -8,26 +8,20 @@ export default function PatientDashboard() {
   const { authFetch, user, logout, notificationsUnread, messagesUnread, refreshProfile } = useAuth();
   const [results, setResults] = useState([]);
   const [visibleCount, setVisibleCount] = useState(6);
-  const [expandedIds, setExpandedIds] = useState(new Set());
-  const [loading, setLoading] = useState(false);
   const [heartRate, setHeartRate] = useState(null);
   const [fallbackHR, setFallbackHR] = useState(null); // last available from prior days
   const [heartRateSource, setHeartRateSource] = useState(null); // live | summary | cached
   const [selectedDateExercise, setSelectedDateExercise] = useState(() => new Date().toISOString().slice(0, 10));
   const [selectedDateCognitive, setSelectedDateCognitive] = useState(() => new Date().toISOString().slice(0, 10));
   const [fitbitStatus, setFitbitStatus] = useState('checking'); // checking | connected | not-connected | error
-  const maxTrendPoints = 20;
 
   const fetchResults = async () => {
-    setLoading(true);
     try {
       const res = await authFetch("http://localhost:5000/api/results");
       const data = await res.json();
       if (data.success) setResults(data.results || []);
     } catch (err) {
       console.error(err);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -127,6 +121,13 @@ export default function PatientDashboard() {
 
           {/* Main content */}
           <main className="col-span-9">
+            <div className="text-center mb-4">
+              <img
+                src="/rodrecover-logo.png"
+                alt="RodRecover"
+                className="mx-auto w-48 max-w-full h-auto object-contain"
+              />
+            </div>
             <div className="bg-gray-800 p-6 rounded shadow">
               <div className="flex justify-between items-center mb-4">
                 <h1 className="text-2xl font-bold">Patient Dashboard</h1>

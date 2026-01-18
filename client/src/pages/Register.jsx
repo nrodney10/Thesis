@@ -48,6 +48,13 @@ export default function Register() {
         onSubmit={handleSubmit}
         className="bg-gray-800 shadow-2xl rounded-2xl p-8 w-full max-w-md"
       >
+        <div className="text-center mb-4">
+          <img
+            src="/rodrecover-logo.png"
+            alt="RodRecover"
+            className="mx-auto w-48 max-w-full h-auto object-contain"
+          />
+        </div>
         <h1 className="text-3xl font-bold text-center text-white mb-6">
           RodRecover Registration 🩺
         </h1>

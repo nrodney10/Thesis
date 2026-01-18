@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
@@ -65,7 +65,7 @@ export default function TherapistDashboard() {
     }
   };
 
-  const fetchPatientResults = async (patientId) => {
+  const fetchPatientResults = useCallback(async (patientId) => {
     setLoadingResults(true);
     try {
       const res = await authFetch(`http://localhost:5000/api/results?userId=${patientId}`);
@@ -75,7 +75,7 @@ export default function TherapistDashboard() {
       console.error("Failed to fetch patient results", err);
     }
     setLoadingResults(false);
-  };
+  }, [authFetch]);
 
   
 
@@ -248,7 +248,7 @@ export default function TherapistDashboard() {
       setSelectedPatient(first);
       fetchPatientResults(first._id);
     }
-  }, [filteredPatients, selectedPatient]);
+  }, [filteredPatients, selectedPatient, fetchPatientResults]);
 
   // compute daily filtered summaries for selected date
   const exerciseForDate = (date) => recentResults.filter(r => {
@@ -308,6 +308,13 @@ export default function TherapistDashboard() {
 
           {/* Main area */}
           <main className="col-span-7">
+            <div className="text-center mb-4">
+              <img
+                src="/rodrecover-logo.png"
+                alt="RodRecover"
+                className="mx-auto w-48 max-w-full h-auto object-contain"
+              />
+            </div>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-2xl font-semibold">Dashboard</h2>
               <div className="flex items-center gap-3">
