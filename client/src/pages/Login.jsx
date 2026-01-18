@@ -6,6 +6,7 @@ const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
+  const [error, setError] = useState("");
   const passwordRef = useRef(null);
   const navigate = useNavigate();
   const { login } = useAuth();
@@ -25,6 +26,7 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    setError("");
     try {
       const res = await fetch("http://localhost:5000/api/auth/login", {
         method: "POST",
@@ -46,11 +48,11 @@ const Login = () => {
         if (role === "therapist") navigate("/therapist");
         else navigate("/patient");
       } else {
-        alert(`❌ ${data.message || "Login failed"}`);
+        setError(data.message || "Invalid email or password. Please try again.");
       }
     } catch (err) {
       console.error("Login error:", err);
-      alert("Server error");
+      setError("Server error. Please try again shortly.");
     }
   };
 
@@ -66,6 +68,12 @@ const Login = () => {
           <h1 className="text-4xl font-semibold text-white mt-4">User Login</h1>
         </div>
 
+        {error && (
+          <div className="mb-4 flex items-start gap-2 rounded-md border border-red-500 bg-red-900/40 px-4 py-3 text-sm text-red-100 shadow">
+            <span className="text-red-300 font-semibold">Error:</span>
+            <span>{error}</span>
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="bg-gray-800 p-6 rounded-lg shadow-lg">
           <div className="mb-4">
             <label className="flex items-center text-gray-300">

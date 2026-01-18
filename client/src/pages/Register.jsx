@@ -10,6 +10,8 @@ export default function Register() {
     password: "",
     role: "patient",
   });
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -20,6 +22,8 @@ export default function Register() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError("");
+    setSuccess("");
     try {
       const res = await fetch("http://localhost:5000/api/auth/register", {
         method: "POST",
@@ -29,16 +33,16 @@ export default function Register() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        alert("✔ Registered successfully!");
+        setSuccess("Registered successfully! Redirecting...");
         // use centralized auth to store token/user
         login({ token: data.token, user: data.user, remember: true });
         if (data.user?.role === "therapist") navigate("/therapist");
         else navigate("/patient");
       } else {
-        alert("❌ " + (data.message || "Registration failed"));
+        setError(data.message || "Registration failed. Please check your details.");
       }
     } catch (err) {
-      alert("❌ Server error!");
+      setError("Server error. Please try again.");
     }
   };
 
@@ -55,6 +59,18 @@ export default function Register() {
             className="mx-auto w-48 max-w-full h-auto object-contain"
           />
         </div>
+        {error && (
+          <div className="mb-4 flex items-start gap-2 rounded-md border border-red-500 bg-red-900/40 px-4 py-3 text-sm text-red-100 shadow">
+            <span className="text-red-300 font-semibold">Error:</span>
+            <span>{error}</span>
+          </div>
+        )}
+        {success && (
+          <div className="mb-4 flex items-start gap-2 rounded-md border border-green-500 bg-green-900/30 px-4 py-3 text-sm text-green-100 shadow">
+            <span className="text-green-300 font-semibold">Success:</span>
+            <span>{success}</span>
+          </div>
+        )}
         <h1 className="text-3xl font-bold text-center text-white mb-6">
           RodRecover Registration 🩺
         </h1>
