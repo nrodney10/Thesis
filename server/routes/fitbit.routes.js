@@ -164,82 +164,143 @@ async function ensureAccessToken(userId){
   return data.access_token;
 }
 
+async function ensureTherapistAccessToPatient(therapistId, patientId) {
+  const patient = await User.findById(patientId).lean();
+  if (!patient || patient.role !== 'patient') {
+    const err = new Error('Patient not found');
+    err.status = 404;
+    throw err;
+  }
+  if (String(patient.therapistId || '') !== String(therapistId)) {
+    const err = new Error('Forbidden: not assigned');
+    err.status = 403;
+    throw err;
+  }
+  return patient;
+}
+
+async function latestHeartRateForUser(userId) {
+  const access = await ensureAccessToken(userId);
+  const candidateUrls = [
+    `${FITBIT_API}/1/user/-/activities/heart/date/today/1d/1sec.json`,
+    `${FITBIT_API}/1/user/-/activities/heart/date/today/1d/1min.json`,
+    `${FITBIT_API}/1/user/-/activities/heart/date/today/1d.json`
+  ];
+  let last = null; let used = null; let rawResponses = []; let summaryFallback = null; let rateLimited = false;
+  for (const url of candidateUrls) {
+    const r = await fetch(url, { headers:{ 'Authorization':`Bearer ${access}` } });
+    const data = await r.json();
+    if (r.status === 429) rateLimited = true;
+    const summary = extractSummaryBpm(data);
+    if (summary && !summaryFallback) summaryFallback = summary;
+    rawResponses.push({
+      url,
+      status: r.status,
+      ok: r.ok,
+      sample: data['activities-heart-intraday']
+        ? { len: data['activities-heart-intraday'].dataset?.length }
+        : (summary || Object.keys(data))
+    });
+    if (!r.ok) continue;
+    const series = data['activities-heart-intraday']?.dataset || [];
+    if (series.length) { last = series[series.length-1]; used = url; break; }
+    if (!data['activities-heart-intraday']) {
+      used = url;
+      if (!last && summary) {
+        last = { value: summary.bpm, time: summary.time, source: summary.source };
+      }
+      break;
+    }
+  }
+  const bpm = (last && typeof last.value === 'number') ? last.value : (summaryFallback?.bpm ?? null);
+  const bpmTime = last?.time || summaryFallback?.time || null;
+  const bpmSource = last?.source || used || summaryFallback?.source || null;
+  try {
+    if (bpm != null) {
+      await User.findByIdAndUpdate(userId, { $set: { 'fitbit.lastHeartRate': { bpm, time: bpmTime, recordedAt: new Date(), source: bpmSource } } });
+    }
+  } catch (e) { console.warn('Could not persist lastHeartRate', e.message); }
+
+  if (bpm == null) {
+    try {
+      const u = await User.findById(userId).lean();
+      const cached = u?.fitbit?.lastHeartRate || null;
+      if (cached) {
+        return {
+          success:true,
+          bpm: cached.bpm,
+          time: cached.time,
+          source: rateLimited ? 'cached-rate-limit' : 'cached',
+          cachedAt: cached.recordedAt,
+          quotaExhausted: rateLimited,
+          rateLimited
+        };
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  const quotaExhausted = rawResponses.some(rr => rr.status === 429);
+  return {
+    success:true,
+    bpm,
+    time: bpmTime,
+    source: bpmSource,
+    quotaExhausted,
+    rateLimited,
+    summaryUsed: summaryFallback?.source,
+    debug: process.env.NODE_ENV==='development' ? rawResponses : undefined
+  };
+}
+
+async function lastAvailableHeartRateForUser(userId) {
+  const access = await ensureAccessToken(userId);
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const today = new Date();
+  let found = null; let summaryFallback = null;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(today.getTime() - i*24*60*60*1000);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const dd = String(d.getDate()).padStart(2,'0');
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+    const url = `${FITBIT_API}/1/user/-/activities/heart/date/${dateStr}/1d/1min.json`;
+    const r = await fetch(url, { headers:{ 'Authorization':`Bearer ${access}` } });
+    const data = await r.json();
+    if (!r.ok) continue;
+    const summary = extractSummaryBpm(data);
+    if (summary && !summaryFallback) summaryFallback = { bpm: summary.bpm, time: summary.time, date: dateStr, source: summary.source };
+    const series = data['activities-heart-intraday']?.dataset || [];
+    if (series.length) {
+      const last = series[series.length-1];
+      found = { bpm: last.value, time: last.time, date: dateStr };
+      break;
+    }
+  }
+  if (!found && summaryFallback) {
+    found = summaryFallback;
+  }
+  if (!found) {
+    try {
+      const u = await User.findById(userId).lean();
+      const cached = u?.fitbit?.lastHeartRate || null;
+      if (cached) {
+        found = { bpm: cached.bpm, time: cached.time, date: null, source: 'cached', cachedAt: cached.recordedAt };
+      }
+    } catch (e) { /* ignore */ }
+  }
+  if (found?.bpm != null) {
+    try {
+      await User.findByIdAndUpdate(userId, { $set: { 'fitbit.lastHeartRate': { bpm: found.bpm, time: found.time, recordedAt: new Date(), source: found.source || 'last-available' } } });
+    } catch (e) { console.warn('Could not persist lastHeartRate from last-available', e.message); }
+  }
+  return { success:true, found, timeZone: tz };
+}
+
 // Latest heart rate with graceful fallbacks (1sec -> 1min -> summary)
 router.get('/me/heart-rate/latest', verifyToken, async (req,res) => {
   try {
-    const access = await ensureAccessToken(req.user.id);
-    const candidateUrls = [
-      `${FITBIT_API}/1/user/-/activities/heart/date/today/1d/1sec.json`, // may fail / be empty for unapproved apps
-      `${FITBIT_API}/1/user/-/activities/heart/date/today/1d/1min.json`,
-      `${FITBIT_API}/1/user/-/activities/heart/date/today/1d.json` // summary only
-    ];
-    let last = null; let used = null; let rawResponses = []; let summaryFallback = null; let rateLimited = false;
-    for (const url of candidateUrls) {
-      const r = await fetch(url, { headers:{ 'Authorization':`Bearer ${access}` } });
-      const data = await r.json();
-      if (r.status === 429) rateLimited = true;
-      const summary = extractSummaryBpm(data);
-      if (summary && !summaryFallback) summaryFallback = summary;
-      rawResponses.push({
-        url,
-        status: r.status,
-        ok: r.ok,
-        sample: data['activities-heart-intraday']
-          ? { len: data['activities-heart-intraday'].dataset?.length }
-          : (summary || Object.keys(data))
-      });
-      if (!r.ok) continue;
-      const series = data['activities-heart-intraday']?.dataset || [];
-      if (series.length) { last = series[series.length-1]; used = url; break; }
-      // If summary endpoint, break even if empty to avoid extra loops
-      if (!data['activities-heart-intraday']) {
-        used = url;
-        if (!last && summary) {
-          last = { value: summary.bpm, time: summary.time, source: summary.source };
-        }
-        break;
-      }
-    }
-    const bpm = (last && typeof last.value === 'number') ? last.value : (summaryFallback?.bpm ?? null);
-    const bpmTime = last?.time || summaryFallback?.time || null;
-    const bpmSource = last?.source || used || summaryFallback?.source || null;
-    // Persist last known heart-rate for fallback
-    try {
-      if (bpm != null) {
-        await User.findByIdAndUpdate(req.user.id, { $set: { 'fitbit.lastHeartRate': { bpm, time: bpmTime, recordedAt: new Date(), source: bpmSource } } });
-      }
-    } catch (e) { console.warn('Could not persist lastHeartRate', e.message); }
-
-    // If no live data, try cached lastHeartRate from DB
-    if (bpm == null) {
-      try {
-        const u = await User.findById(req.user.id).lean();
-        const cached = u?.fitbit?.lastHeartRate || null;
-        if (cached) {
-          return res.json({
-            success:true,
-            bpm: cached.bpm,
-            time: cached.time,
-            source: rateLimited ? 'cached-rate-limit' : 'cached',
-            cachedAt: cached.recordedAt,
-            quotaExhausted: rateLimited,
-            rateLimited
-          });
-        }
-      } catch (e) { /* ignore */ }
-    }
-
-    const quotaExhausted = rawResponses.some(rr => rr.status === 429);
-    res.json({
-      success:true,
-      bpm,
-      time: bpmTime,
-      source: bpmSource,
-      quotaExhausted,
-      rateLimited,
-      summaryUsed: summaryFallback?.source,
-      debug: process.env.NODE_ENV==='development' ? rawResponses : undefined
-    });
+    const result = await latestHeartRateForUser(req.user.id);
+    res.json(result);
   } catch (e) {
     if (String(e.message||'').includes('Not connected')) return res.status(404).json({ success:false, error:'Not connected' });
     console.error('fitbit latest hr error', e); res.status(500).json({ success:false, error:'Server error', details: e.message });
@@ -249,49 +310,52 @@ router.get('/me/heart-rate/latest', verifyToken, async (req,res) => {
 // Find the most recent available BPM by scanning back up to 7 days (minute-level)
 router.get('/me/heart-rate/last-available', verifyToken, async (req,res) => {
   try {
-    const access = await ensureAccessToken(req.user.id);
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone; // hint to client, Fitbit uses account TZ
-    const today = new Date();
-    let found = null; let summaryFallback = null;
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(today.getTime() - i*24*60*60*1000);
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth()+1).padStart(2,'0');
-      const dd = String(d.getDate()).padStart(2,'0');
-      const dateStr = `${yyyy}-${mm}-${dd}`;
-      const url = `${FITBIT_API}/1/user/-/activities/heart/date/${dateStr}/1d/1min.json`;
-      const r = await fetch(url, { headers:{ 'Authorization':`Bearer ${access}` } });
-      const data = await r.json();
-      if (!r.ok) continue;
-      const summary = extractSummaryBpm(data);
-      if (summary && !summaryFallback) summaryFallback = { bpm: summary.bpm, time: summary.time, date: dateStr, source: summary.source };
-      const series = data['activities-heart-intraday']?.dataset || [];
-      if (series.length) {
-        const last = series[series.length-1];
-        found = { bpm: last.value, time: last.time, date: dateStr };
-        break;
-      }
-    }
-    if (!found && summaryFallback) {
-      found = summaryFallback;
-    }
-    // If nothing found in the scanned days, try cached lastHeartRate on the user record
-    if (!found) {
-      try {
-        const u = await User.findById(req.user.id).lean();
-        const cached = u?.fitbit?.lastHeartRate || null;
-        if (cached) {
-          found = { bpm: cached.bpm, time: cached.time, date: null, source: 'cached', cachedAt: cached.recordedAt };
-        }
-      } catch (e) { /* ignore */ }
-    }
-    if (found?.bpm != null) {
-      try {
-        await User.findByIdAndUpdate(req.user.id, { $set: { 'fitbit.lastHeartRate': { bpm: found.bpm, time: found.time, recordedAt: new Date(), source: found.source || 'last-available' } } });
-      } catch (e) { console.warn('Could not persist lastHeartRate from last-available', e.message); }
-    }
-    res.json({ success:true, found, timeZone: tz });
+    const result = await lastAvailableHeartRateForUser(req.user.id);
+    res.json(result);
   } catch (e) {
+    if (String(e.message||'').includes('Not connected')) return res.status(404).json({ success:false, error:'Not connected' });
+    res.status(500).json({ success:false, error:e.message });
+  }
+});
+
+// Therapist-read heart rate/status for an assigned patient (patient is the one who connects)
+router.get('/patients/:id/status', verifyToken, async (req,res) => {
+  try {
+    if (req.user.role !== 'therapist') return res.status(403).json({ success:false, error:'Forbidden' });
+    const patient = await ensureTherapistAccessToPatient(req.user.id, req.params.id);
+    const connected = Boolean(patient.fitbit?.accessToken);
+    const expiresInMs = patient.fitbit?.expiresAt ? (new Date(patient.fitbit.expiresAt).getTime() - Date.now()) : null;
+    res.json({ success:true, connected, scope:patient.fitbit?.scope, expiresAt:patient.fitbit?.expiresAt, expiresInMs, fitbitUserId: patient.fitbit?.fitbitUserId });
+  } catch (e) {
+    if (e.status === 404) return res.status(404).json({ success:false, error:'Patient not found' });
+    if (e.status === 403) return res.status(403).json({ success:false, error:'Not assigned to this patient' });
+    res.status(500).json({ success:false, error:e.message });
+  }
+});
+
+router.get('/patients/:id/heart-rate/latest', verifyToken, async (req,res) => {
+  try {
+    if (req.user.role !== 'therapist') return res.status(403).json({ success:false, error:'Forbidden' });
+    await ensureTherapistAccessToPatient(req.user.id, req.params.id);
+    const result = await latestHeartRateForUser(req.params.id);
+    res.json(result);
+  } catch (e) {
+    if (e.status === 404) return res.status(404).json({ success:false, error:'Patient not found' });
+    if (e.status === 403) return res.status(403).json({ success:false, error:'Not assigned to this patient' });
+    if (String(e.message||'').includes('Not connected')) return res.status(404).json({ success:false, error:'Not connected' });
+    res.status(500).json({ success:false, error:'Server error', details: e.message });
+  }
+});
+
+router.get('/patients/:id/heart-rate/last-available', verifyToken, async (req,res) => {
+  try {
+    if (req.user.role !== 'therapist') return res.status(403).json({ success:false, error:'Forbidden' });
+    await ensureTherapistAccessToPatient(req.user.id, req.params.id);
+    const result = await lastAvailableHeartRateForUser(req.params.id);
+    res.json(result);
+  } catch (e) {
+    if (e.status === 404) return res.status(404).json({ success:false, error:'Patient not found' });
+    if (e.status === 403) return res.status(403).json({ success:false, error:'Not assigned to this patient' });
     if (String(e.message||'').includes('Not connected')) return res.status(404).json({ success:false, error:'Not connected' });
     res.status(500).json({ success:false, error:e.message });
   }

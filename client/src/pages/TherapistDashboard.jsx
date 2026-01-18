@@ -19,6 +19,10 @@ export default function TherapistDashboard() {
   const [selectedDateCognitive, setSelectedDateCognitive] = useState(() => new Date().toISOString().slice(0, 10));
   const [therapistLink, setTherapistLink] = useState({ patientId: '', status: '' });
   const [removeLink, setRemoveLink] = useState({ patientId: '', status: '' });
+  const [patientHeartRate, setPatientHeartRate] = useState(null);
+  const [patientHeartRateFallback, setPatientHeartRateFallback] = useState(null);
+  const [patientHeartRateSource, setPatientHeartRateSource] = useState(null);
+  const [patientFitbitStatus, setPatientFitbitStatus] = useState('idle'); // idle | checking | connected | not-connected | error
   const navigate = useNavigate();
   const { push } = useToast();
 
@@ -250,6 +254,86 @@ export default function TherapistDashboard() {
     }
   }, [filteredPatients, selectedPatient, fetchPatientResults]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let timer;
+    const pollHeartRate = async () => {
+      if (!selectedPatient?._id) {
+        if (cancelled) return;
+        setPatientHeartRate(null);
+        setPatientHeartRateFallback(null);
+        setPatientHeartRateSource(null);
+        setPatientFitbitStatus('idle');
+        return;
+      }
+      if (cancelled) return;
+      setPatientFitbitStatus((s) => (s === 'connected' ? s : 'checking'));
+      try {
+        const statusRes = await authFetch(`http://localhost:5000/api/fitbit/patients/${selectedPatient._id}/status`);
+        const statusData = await statusRes.json();
+        if (!statusData.connected) {
+          if (!cancelled) {
+            setPatientFitbitStatus('not-connected');
+            setPatientHeartRate(null);
+            setPatientHeartRateFallback(null);
+            setPatientHeartRateSource(null);
+          }
+        } else {
+          const hrRes = await authFetch(`http://localhost:5000/api/fitbit/patients/${selectedPatient._id}/heart-rate/latest`);
+          if (hrRes.status === 404) {
+            if (!cancelled) {
+              setPatientFitbitStatus('not-connected');
+              setPatientHeartRate(null);
+              setPatientHeartRateFallback(null);
+              setPatientHeartRateSource(null);
+            }
+          } else {
+            const hrData = await hrRes.json();
+            if (!cancelled && hrData.success) {
+              if (hrData.bpm != null) {
+                setPatientHeartRate(hrData.bpm);
+                setPatientHeartRateSource(hrData.source || null);
+                if (hrData.source?.includes('cached') || (hrData.source || '').startsWith('summary')) {
+                  setPatientHeartRateFallback({ bpm: hrData.bpm, when: hrData.time || 'today' });
+                } else {
+                  setPatientHeartRateFallback(null);
+                }
+              } else {
+                setPatientHeartRate(null);
+                setPatientHeartRateSource(hrData.source || null);
+              }
+              setPatientFitbitStatus('connected');
+              if (hrData.bpm == null) {
+                try {
+                  const laRes = await authFetch(`http://localhost:5000/api/fitbit/patients/${selectedPatient._id}/heart-rate/last-available`);
+                  const la = await laRes.json();
+                  if (!cancelled && la.success && la.found) {
+                    setPatientHeartRateFallback({ bpm: la.found.bpm, when: `${la.found.date || 'recent'} ${la.found.time || ''}`.trim() });
+                    setPatientHeartRateSource((s) => s || la.found.source || 'last-available');
+                  }
+                } catch (_) { /* ignore */ }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        if (!cancelled) {
+          console.error('therapist heart rate fetch error', e);
+          setPatientFitbitStatus('error');
+        }
+      }
+      timer = setTimeout(pollHeartRate, 20000);
+    };
+    pollHeartRate();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [selectedPatient, authFetch]);
+
+  const patientHrDisplay = patientHeartRate ?? patientHeartRateFallback?.bpm ?? '--';
+  const patientHrStale = (patientHeartRateSource && patientHeartRateSource.includes('cached')) || (patientHeartRateSource || '').startsWith('summary') || (!patientHeartRate && !!patientHeartRateFallback);
+
   // compute daily filtered summaries for selected date
   const exerciseForDate = (date) => recentResults.filter(r => {
     if (!r.createdAt) return false;
@@ -434,6 +518,34 @@ export default function TherapistDashboard() {
               ) : (
                 <div className="mt-3 text-gray-400">No patient selected</div>
               )}
+            </div>
+
+            <div className="bg-gray-800 rounded-lg p-4 mb-4 shadow">
+              <h4 className="text-sm text-gray-300">Heart rate</h4>
+              <div className="flex items-center justify-between mt-3">
+                <div>
+                  <div className="text-2xl font-bold">
+                    {patientFitbitStatus === 'connected'
+                      ? `${patientHrDisplay} bpm`
+                      : patientFitbitStatus === 'checking'
+                        ? '...'
+                        : '--'}
+                  </div>
+                  <div className="text-xs text-gray-400 mt-1">
+                    {patientFitbitStatus === 'not-connected' && 'Patient has not connected Fitbit.'}
+                    {patientFitbitStatus === 'error' && 'Error fetching heart rate.'}
+                    {patientFitbitStatus === 'connected' && patientHrStale && (
+                      <span>Last: {patientHeartRateFallback?.when || 'recent'} (stale)</span>
+                    )}
+                    {patientFitbitStatus === 'connected' && !patientHrStale && 'Live or recent reading'}
+                    {patientFitbitStatus === 'idle' && 'Select a patient to view heart rate.'}
+                  </div>
+                </div>
+                <div className="text-right text-xs text-gray-400">
+                  <div className="uppercase tracking-wide text-[10px] text-gray-500">Patient</div>
+                  <div className="text-sm text-gray-200">{selectedPatient?.name || '—'}</div>
+                </div>
+              </div>
             </div>
 
             <div className="bg-gray-800 rounded-lg p-4 mb-4 shadow">
