@@ -67,11 +67,11 @@ export function AuthProvider({ children }) {
 
   const isAuthenticated = !!token;
 
-  const authFetch = (url, opts = {}) => {
+  const authFetch = useCallback((url, opts = {}) => {
     const headers = opts.headers ? { ...opts.headers } : {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
     return fetch(url, { ...opts, headers });
-  };
+  }, [token]);
 
   const refreshIndicators = useCallback(async () => {
     if (!token) return;

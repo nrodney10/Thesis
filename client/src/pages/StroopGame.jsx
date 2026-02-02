@@ -5,7 +5,7 @@ import { useToast } from "../context/ToastContext";
 
 const COLORS = ["red", "green", "blue", "orange", "purple"];
 
-export default function StroopGame({ assignmentId, assignmentTitle, gameKey = 'stroop', onFinished }) {
+export default function StroopGame({ assignmentId, assignmentTitle, gameKey = 'stroop', isScheduled = false, onFinished }) {
   const navigate = useNavigate();
   const { authFetch } = useAuth();
   const { push } = useToast();
@@ -42,20 +42,24 @@ export default function StroopGame({ assignmentId, assignmentTitle, gameKey = 's
     const avg = Math.round(allTimes.reduce((a, b) => a + b, 0) / allTimes.length);
     const payload = { exerciseId: assignmentId || 'stroop', type: 'cognitive', score: score, metadata: { avgRTms: avg, trials: allTimes.length, gameKey } };
     const markComplete = async () => {
-      if (!assignmentId) return;
+      if (!isScheduled || !assignmentId) return;
       try { await authFetch(`http://localhost:5000/api/exercises/${assignmentId}/complete`, { method: 'POST' }); } catch (_) {}
     };
     try {
-      const res = await authFetch('http://localhost:5000/api/results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const data = await res.json();
-      if (data.success) { push('Stroop result submitted', 'success'); await markComplete(); }
-      else push('Failed to submit Stroop result', 'error');
+      if (isScheduled) {
+        const res = await authFetch('http://localhost:5000/api/results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (data.success) { push('Stroop result submitted', 'success'); await markComplete(); }
+        else push('Failed to submit Stroop result', 'error');
+      } else {
+        push('Practice round finished. Result not submitted (practice mode).', 'info');
+      }
     } catch (err) {
       console.error(err);
       push('Error submitting Stroop result', 'error');
     }
     if (onFinished) onFinished();
-    else navigate('/patient');
+    else navigate('/games', { replace: true });
   };
 
   useEffect(() => {

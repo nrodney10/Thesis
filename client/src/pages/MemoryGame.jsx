@@ -16,7 +16,7 @@ const EMOJIS = [
   "🐨","🐯","🦁","🐮","🐷","🐸","🐵","🐔"
 ];
 
-export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "memory", onFinished }) {
+export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "memory", isScheduled = false, onFinished }) {
   const navigate = useNavigate();
   const { authFetch } = useAuth();
   const { push } = useToast();
@@ -73,18 +73,14 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
   useEffect(() => {
     if (matchedCount === totalPairs && totalPairs > 0) {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      // Only auto-submit for scheduled games; practice runs should wait for manual submit
+      if (isScheduled && !autoSubmitted) {
+        setAutoSubmitted(true);
+        const t = setTimeout(() => { submitResult(); }, 700);
+        return () => clearTimeout(t);
+      }
     }
-  }, [matchedCount, totalPairs]);
-
-  // Auto-submit when finished
-  useEffect(() => {
-    if (matchedCount === totalPairs && totalPairs > 0 && !autoSubmitted) {
-      setAutoSubmitted(true);
-      // small delay to allow UI to update
-      const t = setTimeout(() => { submitResult(); }, 700);
-      return () => clearTimeout(t);
-    }
-  }, [matchedCount, totalPairs, autoSubmitted]);
+  }, [matchedCount, totalPairs, autoSubmitted, isScheduled]);
 
   const handleFlip = (card) => {
     if (!startTime) setStartTime(Date.now());
@@ -149,24 +145,33 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
     };
 
     const markComplete = async () => {
-      if (!assignmentId) return;
+      if (!isScheduled || !assignmentId) return;
       try { await authFetch(`http://localhost:5000/api/exercises/${assignmentId}/complete`, { method: 'POST' }); } catch (_) {}
     };
 
     try {
-      const res = await authFetch("http://localhost:5000/api/results", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (data.success) {
-        push("Result submitted! Score: " + score, 'success');
-        await markComplete();
-        if (onFinished) onFinished();
-        else navigate('/patient');
+      let ok = true;
+      if (isScheduled) {
+        const res = await authFetch("http://localhost:5000/api/results", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        ok = data.success;
+        if (ok) {
+          push("Result submitted! Score: " + score, 'success');
+          await markComplete();
+        } else {
+          push('Failed to submit result', 'error');
+        }
       } else {
-        push('Failed to submit result', 'error');
+        // Practice: no auto-submit; just notify locally
+        push("Practice round finished. Result not submitted (practice mode).", 'info');
+      }
+      if (ok) {
+        if (onFinished) onFinished();
+        else navigate('/games', { replace: true });
       }
     } catch (err) {
       console.error(err);
@@ -215,7 +220,7 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
               <div className="mt-3 flex gap-2">
                 <button onClick={submitResult} className="bg-green-600 text-white px-3 py-2 rounded">Submit Result</button>
                 <button onClick={restart} className="bg-indigo-600 text-white px-3 py-2 rounded">Play Again</button>
-                <button onClick={() => navigate('/patient')} className="bg-gray-600 text-white px-3 py-2 rounded">Back</button>
+                <button onClick={() => navigate('/games', { replace: true })} className="bg-gray-600 text-white px-3 py-2 rounded">Back</button>
               </div>
             </div>
           ) : null}
@@ -224,4 +229,3 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
     </div>
   );
 }
-

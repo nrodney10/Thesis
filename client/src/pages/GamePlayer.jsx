@@ -60,11 +60,14 @@ export default function GamePlayer() {
   );
 
   const gameKey = (assignment?.metadata?.gameKey || '').toLowerCase();
+  const isScheduled = Boolean(assignment?.dueAt);
   const commonProps = {
     assignmentId: assignment?._id,
     assignmentTitle: assignment?.title,
     gameKey,
-    onFinished: () => navigate('/games')
+    isScheduled,
+    dueAt: assignment?.dueAt,
+    onFinished: () => navigate('/games', { replace: true })
   };
 
   if (gameKey === 'stroop') return <StroopGame {...commonProps} />;

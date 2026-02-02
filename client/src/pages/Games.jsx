@@ -101,14 +101,7 @@ export default function Games() {
     return { completedAt, completedToday };
   };
 
-  const visiblePatientAssignments = useMemo(() => {
-    return patientAssignments.filter((g) => {
-      const status = completionStatus(g);
-      if (!status) return true;
-      // Hide the next day
-      return status.completedAt >= startOfToday;
-    });
-  }, [patientAssignments, startOfToday]);
+  const visiblePatientAssignments = useMemo(() => patientAssignments, [patientAssignments]);
 
   const toggle = (id) => {
     setSelected((prev) => {
@@ -143,24 +136,46 @@ export default function Games() {
   }, [selectedPatientId]);
 
   const splitPatientGames = useMemo(() => {
-    const ready = [];
-    const scheduled = [];
+    const practiceReady = [];
+    const scheduledFuture = [];
+    const scheduledNowAvailable = [];
+
+    const keyOf = (g) => (g?.metadata?.gameKey || g?.title || '').toLowerCase();
+
     visiblePatientAssignments.forEach((g) => {
       const dueMs = g?.dueAt ? new Date(g.dueAt).getTime() : NaN;
-      if (Number.isFinite(dueMs)) scheduled.push(g); else ready.push(g);
+      if (!Number.isFinite(dueMs)) {
+        practiceReady.push(g);
+      } else if (dueMs > now.getTime()) {
+        scheduledFuture.push(g);
+      } else {
+        scheduledNowAvailable.push(g);
+      }
     });
-    scheduled.sort((a, b) => {
+
+    // If a scheduled assignment is now available, hide the practice version of the same game to avoid duplicates
+    const availableKeys = new Set(scheduledNowAvailable.map(keyOf).filter(Boolean));
+    const dedupedPractice = practiceReady.filter((g) => !availableKeys.has(keyOf(g)));
+
+    const ready = [...scheduledNowAvailable, ...dedupedPractice];
+
+    scheduledFuture.sort((a, b) => {
       const aMs = a?.dueAt ? new Date(a.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
       const bMs = b?.dueAt ? new Date(b.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
       return aMs - bMs;
     });
-    return { readyGames: ready, scheduledGames: scheduled };
-  }, [visiblePatientAssignments]);
+
+    return { readyGames: ready, scheduledGames: scheduledFuture };
+  }, [visiblePatientAssignments, now]);
 
   const canStartGame = (g) => {
     const dueMs = g?.dueAt ? new Date(g.dueAt).getTime() : NaN;
-    if (Number.isFinite(dueMs) && dueMs > now.getTime()) return false;
+    // Practice games (no due date) are always playable
+    if (!Number.isFinite(dueMs)) return true;
+    // Scheduled games unlock at or after their due time
+    if (dueMs > now.getTime()) return false;
     const completed = completionStatus(g);
+    // Prevent replaying a scheduled game on the same day
     if (completed?.completedToday) return false;
     return true;
   };
@@ -379,21 +394,28 @@ export default function Games() {
                 {readyGames.map((g) => {
                   const dueAt = g.dueAt ? new Date(g.dueAt) : null;
                   const completed = completionStatus(g);
+                  const isPractice = !g.dueAt;
+                  const canStart = canStartGame(g);
+                  const label = (() => {
+                    if (isPractice) return 'Play';
+                    if (completed?.completedToday) return 'Completed';
+                    return canStart ? 'Play' : 'Locked';
+                  })();
+                  const disabled = isPractice ? false : !canStart;
                   return (
                     <li key={g._id} className="p-3 bg-gray-900 rounded flex items-center justify-between">
                       <div>
                         <div className="font-semibold text-white">{g.title}</div>
                         <div className="text-xs text-gray-400">Game: {g.metadata?.gameKey || 'game'}</div>
                         {g.description && <div className="text-xs text-gray-400 mt-1">{g.description}</div>}
-                        {dueAt && <div className="text-[11px] text-gray-500 mt-1">Scheduled for {dueAt.toLocaleDateString()} (now available)</div>}
-                        {completed?.completedToday && <div className="text-[11px] text-green-300 mt-1">Performed today</div>}
+                        {!isPractice && completed?.completedToday && <div className="text-[11px] text-green-300 mt-1">Performed today</div>}
                       </div>
                       <button
                         onClick={() => startGame(g)}
-                        disabled={!!completed?.completedToday}
-                        className={`px-3 py-1 rounded text-sm ${completed?.completedToday ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-indigo-600 text-white'}`}
+                        disabled={disabled}
+                        className={`px-3 py-1 rounded text-sm ${disabled ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-indigo-600 text-white'}`}
                       >
-                        {completed?.completedToday ? 'Completed' : 'Play'}
+                        {label}
                       </button>
                     </li>
                   );

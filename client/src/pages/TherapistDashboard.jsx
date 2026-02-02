@@ -23,6 +23,7 @@ export default function TherapistDashboard() {
   const [patientHeartRateFallback, setPatientHeartRateFallback] = useState(null);
   const [patientHeartRateSource, setPatientHeartRateSource] = useState(null);
   const [patientFitbitStatus, setPatientFitbitStatus] = useState('idle'); // idle | checking | connected | not-connected | error
+  const [showAvailableDebug, setShowAvailableDebug] = useState(false);
   const navigate = useNavigate();
   const { push } = useToast();
 
@@ -41,11 +42,7 @@ export default function TherapistDashboard() {
           }
         }
         // also fetch available patients for assignment
-        try {
-          const r2 = await authFetch('http://localhost:5000/api/patients/available');
-          const j2 = await r2.json();
-          if (j2.success) setAvailablePatients(j2.patients || []);
-        } catch (e) { console.warn('failed to load available patients', e); }
+        fetchAvailablePatients();
         fetchSchedule();
       } catch (err) {
         console.error("Failed to load patients", err);
@@ -68,6 +65,18 @@ export default function TherapistDashboard() {
       console.error("Failed to fetch patients", err);
     }
   };
+
+  const fetchAvailablePatients = useCallback(async () => {
+    try {
+      const r2 = await authFetch('http://localhost:5000/api/patients/available');
+      const j2 = await r2.json();
+      if (j2.success) setAvailablePatients(j2.patients || []);
+      else setAvailablePatients([]);
+    } catch (e) {
+      console.warn('failed to load available patients', e);
+      setAvailablePatients([]);
+    }
+  }, [authFetch]);
 
   const fetchPatientResults = useCallback(async (patientId) => {
     setLoadingResults(true);
@@ -170,6 +179,7 @@ export default function TherapistDashboard() {
       if (data.success) {
       setTherapistLink((s)=>({ ...s, status:'You are assigned as therapist' }));
       fetchPatients();
+      fetchAvailablePatients();
     } else {
       setTherapistLink((s)=>({ ...s, status: data.message || 'Failed to assign' }));
     }
@@ -191,6 +201,7 @@ export default function TherapistDashboard() {
       if (data.success) {
         setRemoveLink((s)=>({ ...s, status:'Removed link' }));
         fetchPatients();
+        fetchAvailablePatients();
       } else {
         setRemoveLink((s)=>({ ...s, status: data.message || 'Failed to remove' }));
       }
@@ -385,7 +396,7 @@ export default function TherapistDashboard() {
                   </div>
                 ))}
               </div>
-              <button className="w-full text-left px-3 py-2 rounded hover:bg-gray-700 mt-3" onClick={() => fetchPatients()}>Refresh</button>
+              <button className="w-full text-left px-3 py-2 rounded hover:bg-gray-700 mt-3" onClick={() => { fetchPatients(); fetchAvailablePatients(); }}>Refresh</button>
               <button className="w-full text-left px-3 py-2 rounded hover:bg-gray-700 text-red-300 mt-4" onClick={logout}>Logout</button>
             </nav>
           </aside>
@@ -590,6 +601,13 @@ export default function TherapistDashboard() {
                 </select>
                 <button onClick={assignTherapistToPatient} className="bg-green-600 px-3 py-2 rounded text-sm whitespace-nowrap">Assign</button>
               </div>
+              <div className="text-xs text-gray-400 mt-2 flex items-center justify-between">
+                <div>Available patients: <span className="font-medium text-gray-200">{availablePatients.length}</span></div>
+                <button onClick={()=>setShowAvailableDebug(s=>!s)} className="text-indigo-300 underline text-xs">{showAvailableDebug ? 'Hide details' : 'Show details'}</button>
+              </div>
+              {showAvailableDebug && (
+                <pre className="text-xs bg-gray-900 p-2 rounded mt-2 overflow-auto max-h-40">{JSON.stringify(availablePatients, null, 2)}</pre>
+              )}
               {therapistLink.status && <div className="text-xs text-gray-300 mt-1">{therapistLink.status}</div>}
               <div className="text-[11px] text-gray-400 mt-1">Patient will get a request and must accept you as their therapist.</div>
             </div>
