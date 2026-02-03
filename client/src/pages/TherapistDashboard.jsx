@@ -27,6 +27,18 @@ export default function TherapistDashboard() {
   const navigate = useNavigate();
   const { push } = useToast();
 
+  const fetchAvailablePatients = useCallback(async () => {
+    try {
+      const r2 = await authFetch('http://localhost:5000/api/patients/available');
+      const j2 = await r2.json();
+      if (j2.success) setAvailablePatients(j2.patients || []);
+      else setAvailablePatients([]);
+    } catch (e) {
+      console.warn('failed to load available patients', e);
+      setAvailablePatients([]);
+    }
+  }, [authFetch]);
+
   // Mock data used until API endpoints are added
   useEffect(() => {
     // load patients from API
@@ -52,6 +64,23 @@ export default function TherapistDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Keep "available patients" fresh so newly registered patients appear automatically
+  useEffect(() => {
+    let cancelled = false;
+    let timer;
+    const poll = async () => {
+      if (cancelled) return;
+      await fetchAvailablePatients();
+      if (cancelled) return;
+      timer = setTimeout(poll, 30000);
+    };
+    poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [fetchAvailablePatients]);
+
   // Placeholder for fetching real patients via API
   const fetchPatients = async () => {
     try {
@@ -65,18 +94,6 @@ export default function TherapistDashboard() {
       console.error("Failed to fetch patients", err);
     }
   };
-
-  const fetchAvailablePatients = useCallback(async () => {
-    try {
-      const r2 = await authFetch('http://localhost:5000/api/patients/available');
-      const j2 = await r2.json();
-      if (j2.success) setAvailablePatients(j2.patients || []);
-      else setAvailablePatients([]);
-    } catch (e) {
-      console.warn('failed to load available patients', e);
-      setAvailablePatients([]);
-    }
-  }, [authFetch]);
 
   const fetchPatientResults = useCallback(async (patientId) => {
     setLoadingResults(true);

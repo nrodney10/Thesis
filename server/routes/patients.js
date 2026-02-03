@@ -20,6 +20,40 @@ router.get("/", verifyToken, async (req, res) => {
   }
 });
 
+// GET /api/patients/available - therapist-only: patients that are not assigned to any therapist
+// NOTE: We return any patient with no `therapistId`. These will include patients who
+// may already have a pending therapist request; therapists can still send a request
+// which the patient will be prompted to accept. If you want to hide patients with
+// pending requests, reintroduce the pendingTherapistId filter.
+router.get('/available', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'therapist') return res.status(403).json({ success:false, message:'Forbidden' });
+    // Include any patient with no therapist (therapistId missing or null)
+    const patients = await User.find({
+      role: 'patient',
+      $or: [
+        { therapistId: { $exists: false } },
+        { therapistId: null }
+      ]
+    }).select('-password');
+    res.json({ success:true, patients });
+  } catch (e) {
+    console.error('get available patients error', e);
+    res.status(500).json({ success:false, message:'Server error' });
+  }
+});
+
+// List available therapists (for patients to browse)
+router.get('/therapists', verifyToken, async (req, res) => {
+  try {
+    const therapists = await User.find({ role: 'therapist' }).select('_id name email');
+    res.json({ success:true, therapists });
+  } catch (e) {
+    console.error('get therapists error', e);
+    res.status(500).json({ success:false, message:'Server error' });
+  }
+});
+
 // GET /api/patients/:id - return a single patient's public info
 router.get('/:id', verifyToken, async (req, res) => {
   try {
@@ -39,41 +73,6 @@ router.get('/:id', verifyToken, async (req, res) => {
   } catch (err) {
     console.error('Get patient error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
-
-// GET /api/patients/available - therapist-only: patients that are not assigned to any therapist
-// NOTE: We return any patient with no `therapistId`. These will include patients who
-// may already have a pending therapist request; therapists can still send a request
-// which the patient will be prompted to accept. If you want to hide patients with
-// pending requests, reintroduce the pendingTherapistId filter.
-router.get('/available', verifyToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'therapist') return res.status(403).json({ success:false, message:'Forbidden' });
-    // Include any patient with no therapist (therapistId missing, null or empty string)
-    const patients = await User.find({
-      role: 'patient',
-      $or: [
-        { therapistId: { $exists: false } },
-        { therapistId: null },
-        { therapistId: '' }
-      ]
-    }).select('-password');
-    res.json({ success:true, patients });
-  } catch (e) {
-    console.error('get available patients error', e);
-    res.status(500).json({ success:false, message:'Server error' });
-  }
-});
-
-// List available therapists (for patients to browse)
-router.get('/therapists', verifyToken, async (req, res) => {
-  try {
-    const therapists = await User.find({ role: 'therapist' }).select('_id name email');
-    res.json({ success:true, therapists });
-  } catch (e) {
-    console.error('get therapists error', e);
-    res.status(500).json({ success:false, message:'Server error' });
   }
 });
 
