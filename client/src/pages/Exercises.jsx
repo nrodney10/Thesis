@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
@@ -70,7 +70,7 @@ export default function Exercises() {
   useEffect(() => {
     fetchExercises();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [location.key]);
 
   // honor optional ?patientId= in URL to preselect a patient when navigating from dashboard
   useEffect(() => {
@@ -193,7 +193,7 @@ export default function Exercises() {
 
   const filteredExercises = exercises.filter((ex) => (ex.metadata?.assignmentType || 'exercise') !== 'game');
 
-  const completionStatus = (item) => {
+  const completionStatus = useCallback((item) => {
     if (!userId) return null;
     const entry = (item?.completions || []).find((c) => String(c.userId) === String(userId));
     if (!entry) return null;
@@ -201,7 +201,7 @@ export default function Exercises() {
     if (!completedAt || Number.isNaN(completedAt.getTime())) return null;
     const completedToday = completedAt >= startOfToday;
     return { completedAt, completedToday };
-  };
+  }, [userId, startOfToday]);
 
   const patientExercises = selectedPatientId
     ? filteredExercises.filter((ex) => isAssignedToPatient(ex, selectedPatientId))
@@ -213,22 +213,30 @@ export default function Exercises() {
       if (!status) return true;
       return status.completedAt >= startOfToday;
     });
-  }, [filteredExercises, startOfToday]);
+  }, [filteredExercises, startOfToday, completionStatus]);
 
   const splitPatientExercises = useMemo(() => {
     const ready = [];
     const scheduled = [];
     visiblePatientExercises.forEach((ex) => {
       const dueMs = ex?.dueAt ? new Date(ex.dueAt).getTime() : NaN;
-      if (Number.isFinite(dueMs)) scheduled.push(ex); else ready.push(ex);
+      if (Number.isFinite(dueMs)) {
+        const completed = completionStatus(ex);
+        if (!completed?.completedToday) scheduled.push(ex);
+      } else {
+        ready.push(ex);
+      }
     });
     scheduled.sort((a, b) => {
       const aMs = a?.dueAt ? new Date(a.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
       const bMs = b?.dueAt ? new Date(b.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
+      const aOverdue = Number.isFinite(aMs) && aMs < startOfToday.getTime();
+      const bOverdue = Number.isFinite(bMs) && bMs < startOfToday.getTime();
+      if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
       return aMs - bMs;
     });
     return { readyExercises: ready, scheduledExercises: scheduled };
-  }, [visiblePatientExercises]);
+  }, [visiblePatientExercises, startOfToday, completionStatus]);
 
   const patientReadyExercises = splitPatientExercises.readyExercises;
   const patientScheduledExercises = splitPatientExercises.scheduledExercises;
@@ -734,7 +742,7 @@ export default function Exercises() {
           <aside className="bg-gray-800 p-6 rounded shadow space-y-3">
             <div>
               <h3 className="text-lg font-semibold">Scheduled</h3>
-              <p className="text-sm text-gray-400">Upcoming exercises appear here with a live countdown.</p>
+              <p className="text-sm text-gray-400">Upcoming exercises appear here with a live countdown. Overdue items show in red.</p>
             </div>
             {loading ? (
               <p className="text-gray-400 text-sm">Loading scheduled exercises...</p>
@@ -744,9 +752,19 @@ export default function Exercises() {
               <ul className="space-y-3">
                 {patientScheduledExercises.map((ex) => {
                   const dueLabel = ex.dueAt ? new Date(ex.dueAt).toLocaleString() : 'Scheduled';
-                  const countdown = countdownFor(ex.dueAt);
-                  const disabled = !canStartExercise(ex);
                   const completed = completionStatus(ex);
+                  const dueMs = ex?.dueAt ? new Date(ex.dueAt).getTime() : NaN;
+                  const overdue = Number.isFinite(dueMs) && dueMs < startOfToday.getTime() && !completed?.completedToday;
+                  const countdown = countdownFor(ex.dueAt);
+                  const statusText = completed?.completedToday
+                    ? 'Performed today'
+                    : overdue
+                      ? 'Overdue'
+                      : countdown === 'Ready now'
+                        ? 'Ready now'
+                        : `Starts in ${countdown}`;
+                  const statusClass = overdue ? 'text-red-400' : 'text-indigo-300';
+                  const disabled = !canStartExercise(ex);
                   return (
                     <li key={ex._id} className="p-3 bg-gray-900 rounded border border-gray-700">
                       <div className="flex items-start justify-between gap-3">
@@ -754,7 +772,7 @@ export default function Exercises() {
                           <div className="font-semibold">{ex.title}</div>
                           <div className="text-xs text-gray-400">{ex.description}</div>
                           <div className="text-xs text-gray-400 mt-1">Scheduled for {dueLabel}</div>
-                          <div className="text-[11px] text-indigo-300 mt-1">{completed?.completedToday ? 'Performed today' : `Starts in ${countdown}`}</div>
+                          <div className={`text-[11px] mt-1 ${statusClass}`}>{statusText}</div>
                         </div>
                         <button
                           onClick={() => startExercise(ex)}

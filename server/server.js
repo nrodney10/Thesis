@@ -96,7 +96,6 @@ setInterval(async () => {
   }
 }, 60000); // 60s
 
-// Periodic auto-allocation (runs every 6 hours) to assign tailored exercises based on vulnerabilities
 setInterval(async () => {
   try {
     const results = await autoAllocateForAllPatients({ limitPerPatient: 3 });

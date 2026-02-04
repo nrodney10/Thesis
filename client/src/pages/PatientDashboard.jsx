@@ -2,16 +2,15 @@ import React, { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import UnreadBadge from "../components/UnreadBadge";
 import TrendChart from "../components/TrendChart";
+import ExerciseCharts from "../components/ExerciseCharts";
 import { Link } from "react-router-dom";
 
 export default function PatientDashboard() {
   const { authFetch, user, logout, notificationsUnread, messagesUnread, refreshProfile } = useAuth();
   const [results, setResults] = useState([]);
-  const [visibleCount, setVisibleCount] = useState(6);
   const [heartRate, setHeartRate] = useState(null);
   const [fallbackHR, setFallbackHR] = useState(null); // last available from prior days
   const [heartRateSource, setHeartRateSource] = useState(null); // live | summary | cached
-  const [selectedDateExercise, setSelectedDateExercise] = useState(() => new Date().toISOString().slice(0, 10));
   const [selectedDateCognitive, setSelectedDateCognitive] = useState(() => new Date().toISOString().slice(0, 10));
   const [fitbitStatus, setFitbitStatus] = useState('checking'); // checking | connected | not-connected | error
 
@@ -153,7 +152,7 @@ export default function PatientDashboard() {
                   </div>
                   <div className="p-4 bg-gray-800 rounded shadow">
                     <div className="text-xs text-gray-300">Exercises done</div>
-                    <div className="text-2xl font-bold mt-1">{results.filter(r => r.type === 'exercise').length || 0}</div>
+                    <div className="text-2xl font-bold mt-1">{results.filter(r => ['exercise','physical'].includes(r.type)).length || 0}</div>
                     <div className="text-xs text-gray-500 mt-1">tracked</div>
                   </div>
                   <div className="p-4 bg-gray-800 rounded shadow">
@@ -188,21 +187,10 @@ export default function PatientDashboard() {
                   <div className="space-y-6">
                     <div className="rounded-lg overflow-hidden">
                       <div className="bg-gray-800 p-3 flex items-center justify-between">
-                        <div className="text-sm text-gray-200 font-semibold">Exercise scores</div>
-                        <div className="flex items-center gap-3">
-                          <label className="text-xs text-gray-300">Date</label>
-                          <input type="date" value={selectedDateExercise} onChange={(e)=>setSelectedDateExercise(e.target.value)} className="bg-gray-700 text-sm text-gray-100 px-2 py-1 rounded" />
-                        </div>
+                        <div className="text-sm text-gray-200 font-semibold">Exercise progress</div>
                       </div>
-                      <TrendChart label="Exercise scores" color="#7c3aed" data={results} types={["exercise", "physical"]} limit={60} height={320} yLabel="Score" showHeader={true} />
-                      <div className="p-3 text-xs text-gray-300">
-                        {(() => {
-                          const day = selectedDateExercise;
-                          const filtered = results.filter(r => r.createdAt && new Date(r.createdAt).toISOString().slice(0,10) === day && (r.type === 'exercise' || r.type === 'physical'));
-                          if (filtered.length === 0) return (<div>No exercises on {day}.</div>);
-                          const avg = Math.round((filtered.reduce((s, r) => s + (r.score || 0), 0) / filtered.length) || 0);
-                          return (<div>Items: {filtered.length} • Avg: {avg}</div>);
-                        })()}
+                      <div className="p-3">
+                        <ExerciseCharts results={results} compact />
                       </div>
                     </div>
                     <div className="rounded-lg overflow-hidden">
@@ -213,7 +201,31 @@ export default function PatientDashboard() {
                           <input type="date" value={selectedDateCognitive} onChange={(e)=>setSelectedDateCognitive(e.target.value)} className="bg-gray-700 text-sm text-gray-100 px-2 py-1 rounded" />
                         </div>
                       </div>
-                      <TrendChart label="Cognitive game scores" color="#22c55e" data={results} types={["game", "cognitive"]} limit={60} height={320} yLabel="Score" showHeader={true} />
+                      <TrendChart
+                        label="Cognitive game scores"
+                        color="#22c55e"
+                        data={results}
+                        types={["game", "cognitive"]}
+                        limit={60}
+                        height={320}
+                        yLabel="Score"
+                        showHeader={true}
+                        showFullLabel={true}
+                        tooltipLines={(raw, value) => ([
+                          `Score: ${value}`,
+                          (() => {
+                            const key = raw?.metadata?.gameKey || raw?.gameKey || '';
+                            if (!key) return null;
+                            const label = key === 'memory' ? 'Memory Match' : key === 'stroop' ? 'Stroop Test' : key;
+                            return `Game: ${label}`;
+                          })(),
+                          raw?.metadata?.avgRTms != null ? `Avg RT: ${raw.metadata.avgRTms} ms` : null,
+                          raw?.metadata?.moves != null ? `Moves: ${raw.metadata.moves}` : null,
+                          raw?.metadata?.timeSeconds != null ? `Time: ${raw.metadata.timeSeconds}s` : null,
+                          raw?.metadata?.trials != null ? `Trials: ${raw.metadata.trials}` : null,
+                          raw?.createdAt ? new Date(raw.createdAt).toLocaleString() : null
+                        ].filter(Boolean))}
+                      />
                       <div className="p-3 text-xs text-gray-300">
                         {(() => {
                           const day = selectedDateCognitive;

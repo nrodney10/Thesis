@@ -9,7 +9,9 @@ export default function TrendChart({
   color = '#60a5fa',
   height = 220,
   yLabel = 'Score',
-  showHeader = true
+  showHeader = true,
+  showFullLabel = false,
+  tooltipLines = null
 }) {
   const [hover, setHover] = useState(null);
   const svgRef = useRef(null);
@@ -118,7 +120,9 @@ export default function TrendChart({
       clientX: chosen.clientX,
       clientY: chosen.clientY,
       label: p.label,
-      value: Math.round(p.y * 10) / 10
+      fullLabel: p._fullLabel,
+      value: Math.round(p.y * 10) / 10,
+      raw: p.raw
     });
   };
 
@@ -185,8 +189,16 @@ export default function TrendChart({
           </svg>
           {hover && (
             <div className="absolute bg-gray-800 text-gray-100 text-xs px-3 py-2 rounded border border-gray-700 shadow" style={{ left: hover.clientX - 60, top: hover.clientY - 70 }}>
-              <div className="font-semibold">{hover.value}</div>
-              <div className="text-[11px] text-gray-300">{hover.label}</div>
+              {Array.isArray(tooltipLines) ? (
+                tooltipLines.map((line, idx) => <div key={idx} className={idx === 0 ? "font-semibold" : "text-[11px] text-gray-300"}>{line}</div>)
+              ) : (typeof tooltipLines === 'function') ? (
+                tooltipLines(hover.raw, hover.value).map((line, idx) => <div key={idx} className={idx === 0 ? "font-semibold" : "text-[11px] text-gray-300"}>{line}</div>)
+              ) : (
+                <>
+                  <div className="font-semibold">{hover.value}</div>
+                  <div className="text-[11px] text-gray-300">{showFullLabel ? hover.fullLabel : hover.label}</div>
+                </>
+              )}
             </div>
           )}
         </div>

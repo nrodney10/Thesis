@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 export default function PatientCalendar() {
@@ -8,7 +8,7 @@ export default function PatientCalendar() {
   const [month, setMonth] = useState(new Date().getMonth());
   const [year, setYear] = useState(new Date().getFullYear());
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await authFetch('http://localhost:5000/api/calendar/patient');
@@ -18,21 +18,29 @@ export default function PatientCalendar() {
       console.error('calendar load', e);
     }
     setLoading(false);
-  };
+  }, [authFetch]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const monthItems = useMemo(() => {
+    return items.filter((it) => {
+      if (!it.dueAt) return false;
+      const d = new Date(it.dueAt);
+      if (Number.isNaN(d.getTime())) return false;
+      return d.getMonth() === month && d.getFullYear() === year;
+    });
+  }, [items, month, year]);
 
   const grouped = useMemo(() => {
     const map = {};
-    items.forEach(it => {
-      const d = it.dueAt ? new Date(it.dueAt) : null;
-      if (!d) return;
+    monthItems.forEach(it => {
+      const d = new Date(it.dueAt);
       const k = d.toDateString();
       if (!map[k]) map[k] = [];
       map[k].push(it);
     });
     return map;
-  }, [items]);
+  }, [monthItems]);
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDay = new Date(year, month, 1).getDay();
@@ -84,8 +92,11 @@ export default function PatientCalendar() {
         <h2 className="text-lg font-semibold mb-2">Upcoming list</h2>
         {loading ? <div className="text-gray-300">Loading...</div> : (
           <ul className="space-y-2">
-            {items.length === 0 && <li className="text-gray-400 text-sm">No upcoming items.</li>}
-            {items.map((it) => (
+            {monthItems.length === 0 && <li className="text-gray-400 text-sm">No items for this month.</li>}
+            {monthItems
+              .slice()
+              .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())
+              .map((it) => (
               <li key={it.id} className="p-3 rounded bg-gray-900 flex justify-between items-center">
                 <div>
                   <div className="font-medium">{it.title}</div>

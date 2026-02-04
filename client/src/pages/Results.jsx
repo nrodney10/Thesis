@@ -160,6 +160,7 @@ export default function Results() {
             <p>Loading...</p>
           ) : (
             <>
+              <div className="text-xs text-gray-400 mt-2">Activities: {activities.length}{activitiesError ? ` • Error: ${activitiesError}` : ''}</div>
               {/* Recent activities compact list removed — using results cards below instead */}
 
               {results.length === 0 ? (
@@ -168,12 +169,58 @@ export default function Results() {
                 <div>
                   <ul className="space-y-2">
                     {results.slice(0, visibleCount).map((r) => {
+                      const meta = r.metadata || {};
+                      const poseMetrics = meta.poseMetrics;
+                      const gameKey = String(meta.gameKey || '').toLowerCase();
+                      const gameLabel = gameKey === 'memory' ? 'Memory Match' : gameKey === 'stroop' ? 'Stroop Test' : (gameKey ? gameKey : null);
+                      const poseType = String(meta.poseType || '').toLowerCase();
+                      const poseLabel = poseType === 'tpose' ? 'T-pose' : poseType === 'squat' ? 'Squat' : (poseType ? poseType : null);
+                      const title = meta.exerciseTitle || gameLabel || r.title || r.type || 'Result';
+                      const detailRows = [];
+                      const addRow = (label, value) => {
+                        if (value === null || value === undefined) return;
+                        if (typeof value === 'string' && value.trim() === '') return;
+                        detailRows.push({ label, value });
+                      };
+                      addRow('Type', r.type);
+                      addRow('Game', gameLabel);
+                      addRow('Pose', poseLabel);
+                      addRow('Score', r.score);
+                      addRow('Difficulty', meta.difficulty);
+                      addRow('Duration', meta.duration != null ? `${meta.duration}s` : null);
+                      addRow('Reps', meta.reps);
+                      addRow('Heart rate', meta.heartRate != null ? `${meta.heartRate} bpm` : null);
+                      addRow('Moves', meta.moves);
+                      addRow('Time', meta.timeSeconds != null ? `${meta.timeSeconds}s` : null);
+                      addRow('Avg reaction time', meta.avgRTms != null ? `${meta.avgRTms} ms` : null);
+                      addRow('Trials', meta.trials);
+                      if (poseMetrics) {
+                        addRow('Pose reps', poseMetrics.reps ?? 0);
+                        addRow('Avg angle', poseMetrics.avgAngle != null ? `${Math.round(poseMetrics.avgAngle)} deg` : null);
+                        addRow('Cadence', poseMetrics.cadence != null ? `${Math.round(poseMetrics.cadence)}/min` : null);
+                        if (poseType === 'tpose') {
+                          addRow('Time in correct pose', poseMetrics.timeInTargetMs != null ? `${(poseMetrics.timeInTargetMs / 1000).toFixed(1)} s` : '0 s');
+                          addRow('Out of range count', poseMetrics.outOfRangeCount ?? 0);
+                        }
+                        if (poseType === 'squat') {
+                          addRow('Correct squats', poseMetrics.correctReps ?? 0);
+                          addRow('Incorrect squats', poseMetrics.incorrectReps ?? 0);
+                        }
+                        if (!poseType && (poseMetrics.correctReps != null || poseMetrics.incorrectReps != null)) {
+                          addRow('Correct squats', poseMetrics.correctReps ?? 0);
+                          addRow('Incorrect squats', poseMetrics.incorrectReps ?? 0);
+                        }
+                        if (poseMetrics.quality) {
+                          addRow('Quality', Array.isArray(poseMetrics.quality) ? poseMetrics.quality.join(', ') : String(poseMetrics.quality));
+                        }
+                      }
+                      const hasDetails = detailRows.length > 0;
                       const isOpen = expandedIds.has(r._id);
                       return (
                         <li key={r._id} className="card result-card flex flex-col bg-gray-900 p-3 rounded">
                           <div className="flex items-center justify-between">
                             <div>
-                              <div className="text-sm text-gray-200 font-medium">{r.title || r.type || 'Result'}</div>
+                              <div className="text-sm text-gray-200 font-medium">{title}</div>
                               <div className="text-xs text-gray-400">{new Date(r.createdAt).toLocaleString()}</div>
                             </div>
                             <div className="flex items-center gap-3">
@@ -196,18 +243,14 @@ export default function Results() {
                               {r.metadata?.video && (
                                 <div className="text-sm text-gray-300 mb-2">Video: <a href={r.metadata.video} target="_blank" rel="noreferrer" className="text-indigo-300 underline">View clip</a></div>
                               )}
-                              {r.metadata?.poseMetrics && (
-                                <div className="text-sm text-gray-300">
-                                  <div>Reps: {r.metadata.poseMetrics.reps ?? 0}</div>
-                                  <div>Avg angle: {r.metadata.poseMetrics.avgAngle ? Math.round(r.metadata.poseMetrics.avgAngle) + ' deg' : '—'}</div>
-                                  <div>Cadence: {r.metadata.poseMetrics.cadence ? Math.round(r.metadata.poseMetrics.cadence) + '/min' : '—'}</div>
-                                  {r.metadata.poseMetrics.quality && (
-                                    <div>Quality: {Array.isArray(r.metadata.poseMetrics.quality) ? r.metadata.poseMetrics.quality.join(', ') : String(r.metadata.poseMetrics.quality)}</div>
-                                  )}
+                              {hasDetails ? (
+                                <div className="text-sm text-gray-300 space-y-1">
+                                  {detailRows.map((row, idx) => (
+                                    <div key={`${row.label}-${idx}`}>{row.label}: {row.value}</div>
+                                  ))}
                                 </div>
-                              )}
-                              {(!r.metadata?.video && !r.metadata?.poseMetrics) && (
-                                <div className="text-sm text-gray-400">No extra details available.</div>
+                              ) : (
+                                <div className="text-sm text-gray-400">No stats recorded for this session yet.</div>
                               )}
                             </div>
                           </div>

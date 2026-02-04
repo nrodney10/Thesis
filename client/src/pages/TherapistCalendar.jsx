@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 export default function TherapistCalendar() {
@@ -15,7 +15,7 @@ export default function TherapistCalendar() {
   const [month, setMonth] = useState(new Date().getMonth());
   const [year, setYear] = useState(new Date().getFullYear());
 
-  const load = async (patientId) => {
+  const load = useCallback(async (patientId) => {
     setLoading(true);
     try {
       let res;
@@ -27,20 +27,20 @@ export default function TherapistCalendar() {
       console.error('calendar therapist load', e);
     }
     setLoading(false);
-  };
+  }, [authFetch]);
 
-  useEffect(() => { load(selectedPatient); }, [selectedPatient]);
+  useEffect(() => { load(selectedPatient); }, [selectedPatient, load]);
 
-  const fetchPatients = async () => {
+  const fetchPatients = useCallback(async () => {
     try {
       const res = await authFetch('http://localhost:5000/api/patients');
       const data = await res.json();
       if (data.success) setPatients(data.patients || []);
     } catch (e) { console.error('failed to load patients', e); }
-  };
+  }, [authFetch]);
 
-  useEffect(()=>{ fetchPatients(); }, []);
-  useEffect(()=>{ const fetchTemplates = async () => { try { const res = await authFetch('http://localhost:5000/api/templates'); const j = await res.json(); if (j.success) setTemplates(j.templates || []); } catch(e){console.error('failed to load templates', e);} }; fetchTemplates(); }, []);
+  useEffect(()=>{ fetchPatients(); }, [fetchPatients]);
+  useEffect(()=>{ const fetchTemplates = async () => { try { const res = await authFetch('http://localhost:5000/api/templates'); const j = await res.json(); if (j.success) setTemplates(j.templates || []); } catch(e){console.error('failed to load templates', e);} }; fetchTemplates(); }, [authFetch]);
   useEffect(()=>{
     const fetchExisting = async () => {
       try {
@@ -58,17 +58,25 @@ export default function TherapistCalendar() {
     fetchExisting();
   }, [authFetch]);
 
+  const monthItems = useMemo(() => {
+    return items.filter((it) => {
+      if (!it.dueAt) return false;
+      const d = new Date(it.dueAt);
+      if (Number.isNaN(d.getTime())) return false;
+      return d.getMonth() === month && d.getFullYear() === year;
+    });
+  }, [items, month, year]);
+
   const grouped = useMemo(() => {
     const map = {};
-    items.forEach(it => {
-      const d = it.dueAt ? new Date(it.dueAt) : null;
-      if (!d) return;
+    monthItems.forEach(it => {
+      const d = new Date(it.dueAt);
       const k = d.toDateString();
       if (!map[k]) map[k] = [];
       map[k].push(it);
     });
     return map;
-  }, [items]);
+  }, [monthItems]);
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDay = new Date(year, month, 1).getDay();
@@ -86,7 +94,7 @@ export default function TherapistCalendar() {
           <button onClick={load} className="px-3 py-2 bg-indigo-600 rounded text-sm">Refresh</button>
         </div>
         <div className="flex items-center justify-between mb-3">
-          <p className="text-gray-300">Upcoming activities for your patients in the next 30 days.</p>
+          <p className="text-gray-300">Activities for the selected month.</p>
           <div className="flex items-center gap-3">
             <label className="text-sm">Patient
               <select value={selectedPatient} onChange={e=>setSelectedPatient(e.target.value)} className="ml-2 bg-gray-700 p-2 rounded">
@@ -259,8 +267,11 @@ export default function TherapistCalendar() {
         <h2 className="text-lg font-semibold mb-2">Upcoming list</h2>
         {loading ? <div className="text-gray-300">Loading...</div> : (
           <ul className="space-y-2">
-            {items.length === 0 && <li className="text-gray-400 text-sm">No upcoming items.</li>}
-            {items.map((it) => (
+            {monthItems.length === 0 && <li className="text-gray-400 text-sm">No items for this month.</li>}
+            {monthItems
+              .slice()
+              .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())
+              .map((it) => (
               <li key={it.id} className="p-3 rounded bg-gray-900 flex justify-between items-center">
                 <div style={{flex:1}}>
                   <div className="font-medium">{it.title}</div>

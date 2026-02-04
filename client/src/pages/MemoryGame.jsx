@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
@@ -42,6 +42,7 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
   const [startTime, setStartTime] = useState(null);
   const [time, setTime] = useState(0);
   const [autoSubmitted, setAutoSubmitted] = useState(false);
+  const [saveStatus, setSaveStatus] = useState('idle'); // idle | saving | saved | error
   const intervalRef = useRef(null);
   const [focusedIndex, setFocusedIndex] = useState(0);
 
@@ -52,6 +53,8 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
     setMatchedCount(0);
     setStartTime(null);
     setTime(0);
+    setAutoSubmitted(false);
+    setSaveStatus('idle');
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -76,13 +79,13 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
       // Only auto-submit for scheduled games; practice runs should wait for manual submit
       if (isScheduled && !autoSubmitted) {
         setAutoSubmitted(true);
-        const t = setTimeout(() => { submitResult(); }, 700);
+        const t = setTimeout(() => { submitResult({ auto: true }); }, 700);
         return () => clearTimeout(t);
       }
     }
-  }, [matchedCount, totalPairs, autoSubmitted, isScheduled]);
+  }, [matchedCount, totalPairs, autoSubmitted, isScheduled, submitResult]);
 
-  const handleFlip = (card) => {
+  const handleFlip = useCallback((card) => {
     if (!startTime) setStartTime(Date.now());
     if (flipped.find((f) => f.id === card.id) || card.matched) return;
     const newFlipped = [...flipped, card];
@@ -98,7 +101,7 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
         setTimeout(() => setFlipped([]), 700);
       }
     }
-  };
+  }, [startTime, flipped]);
 
   const allMatched = matchedCount === totalPairs && totalPairs > 0;
 
@@ -111,7 +114,7 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [cards, focusedIndex, allMatched, flipped]);
+  }, [cards, focusedIndex, allMatched, flipped, handleFlip]);
 
   const restart = () => {
     const shuffled = shuffle([...EMOJIS.slice(0, totalPairs), ...EMOJIS.slice(0, totalPairs)]).map((value, idx) => ({ id: idx, value, matched: false }));
@@ -121,6 +124,8 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
     setMatchedCount(0);
     setStartTime(null);
     setTime(0);
+    setAutoSubmitted(false);
+    setSaveStatus('idle');
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -135,7 +140,11 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
     return score;
   };
 
-  const submitResult = async () => {
+  const submitResult = async ({ auto = false, navigateOnSave = false } = {}) => {
+    if (saveStatus === 'saved') {
+      if (!auto) push('Results already saved for this session.', 'info');
+      return true;
+    }
     const score = computeScore();
     const payload = {
       exerciseId: assignmentId || `memory-match-${difficulty}`,
@@ -152,6 +161,7 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
     try {
       let ok = true;
       if (isScheduled) {
+        setSaveStatus('saving');
         const res = await authFetch("http://localhost:5000/api/results", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -161,21 +171,26 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
         ok = data.success;
         if (ok) {
           push("Result submitted! Score: " + score, 'success');
+          setSaveStatus('saved');
           await markComplete();
         } else {
           push('Failed to submit result', 'error');
+          setSaveStatus('error');
         }
       } else {
         // Practice: no auto-submit; just notify locally
         push("Practice round finished. Result not submitted (practice mode).", 'info');
       }
       if (ok) {
-        if (onFinished) onFinished();
-        else navigate('/games', { replace: true });
+        if (navigateOnSave) {
+          if (onFinished) onFinished();
+          else navigate('/games', { replace: true });
+        }
       }
     } catch (err) {
       console.error(err);
       push('Error submitting result', 'error');
+      setSaveStatus('error');
     }
   };
 
@@ -198,13 +213,12 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
         <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
           {cards.map((card, idx) => {
             const isFlipped = !!flipped.find((f) => f.id === card.id) || card.matched;
-            const isFocused = focusedIndex === idx;
             return (
               <div
                 key={card.id}
                 onClick={() => handleFlip(card)}
                 tabIndex={0}
-                className="w-16 h-16 md:w-20 md:h-20 flex items-center justify-center rounded cursor-pointer select-none text-2xl md:text-3xl bg-white text-gray-900 border shadow-sm"
+                className={`w-16 h-16 md:w-20 md:h-20 flex items-center justify-center rounded cursor-pointer select-none text-2xl md:text-3xl bg-white text-gray-900 border shadow-sm ${focusedIndex===idx ? 'ring-2 ring-indigo-400' : ''}`}
                 onFocus={() => setFocusedIndex(idx)}
               >
                 {isFlipped ? card.value : '?'}
@@ -217,10 +231,27 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
           {allMatched ? (
             <div className="bg-white p-4 rounded border">
               <div className="text-lg text-gray-900">Finished! Score: {computeScore()}</div>
+              <div className="text-sm text-gray-700 mt-1">
+                {isScheduled
+                  ? (saveStatus === 'saving'
+                    ? 'Saving results...'
+                    : saveStatus === 'saved'
+                      ? 'Results saved and sent to your therapist.'
+                      : saveStatus === 'error'
+                        ? 'Failed to save results. Please try again.'
+                        : 'Results are ready to save.')
+                  : 'Practice round finished.'}
+              </div>
               <div className="mt-3 flex gap-2">
-                <button onClick={submitResult} className="bg-green-600 text-white px-3 py-2 rounded">Submit Result</button>
+                <button
+                  onClick={() => submitResult({ navigateOnSave: false })}
+                  disabled={isScheduled && (saveStatus === 'saving' || saveStatus === 'saved')}
+                  className={`px-3 py-2 rounded ${isScheduled && (saveStatus === 'saving' || saveStatus === 'saved') ? 'bg-gray-400 text-gray-700' : 'bg-green-600 text-white'}`}
+                >
+                  {saveStatus === 'saved' ? 'Saved' : saveStatus === 'saving' ? 'Saving...' : 'Save Result'}
+                </button>
                 <button onClick={restart} className="bg-indigo-600 text-white px-3 py-2 rounded">Play Again</button>
-                <button onClick={() => navigate('/games', { replace: true })} className="bg-gray-600 text-white px-3 py-2 rounded">Back</button>
+                <button onClick={() => (onFinished ? onFinished() : navigate('/games', { replace: true }))} className="bg-gray-600 text-white px-3 py-2 rounded">Exit</button>
               </div>
             </div>
           ) : null}

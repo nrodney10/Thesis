@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 export default function Games() {
   const { user, authFetch } = useAuth();
@@ -18,6 +18,7 @@ export default function Games() {
   const [patientLoading, setPatientLoading] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const userId = user?.id || user?._id;
+  const location = useLocation();
 
   useEffect(() => {
     const load = async () => {
@@ -78,7 +79,7 @@ export default function Games() {
       setPatientLoading(false);
     };
     loadPatientAssignments();
-  }, [authFetch, user?.role]);
+  }, [authFetch, user?.role, location.key]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -137,36 +138,28 @@ export default function Games() {
 
   const splitPatientGames = useMemo(() => {
     const practiceReady = [];
-    const scheduledFuture = [];
-    const scheduledNowAvailable = [];
-
-    const keyOf = (g) => (g?.metadata?.gameKey || g?.title || '').toLowerCase();
+    const scheduledAll = [];
 
     visiblePatientAssignments.forEach((g) => {
       const dueMs = g?.dueAt ? new Date(g.dueAt).getTime() : NaN;
       if (!Number.isFinite(dueMs)) {
         practiceReady.push(g);
-      } else if (dueMs > now.getTime()) {
-        scheduledFuture.push(g);
       } else {
-        scheduledNowAvailable.push(g);
+        scheduledAll.push(g);
       }
     });
 
-    // If a scheduled assignment is now available, hide the practice version of the same game to avoid duplicates
-    const availableKeys = new Set(scheduledNowAvailable.map(keyOf).filter(Boolean));
-    const dedupedPractice = practiceReady.filter((g) => !availableKeys.has(keyOf(g)));
-
-    const ready = [...scheduledNowAvailable, ...dedupedPractice];
-
-    scheduledFuture.sort((a, b) => {
+    scheduledAll.sort((a, b) => {
       const aMs = a?.dueAt ? new Date(a.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
       const bMs = b?.dueAt ? new Date(b.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
+      const aOverdue = Number.isFinite(aMs) && aMs < startOfToday.getTime();
+      const bOverdue = Number.isFinite(bMs) && bMs < startOfToday.getTime();
+      if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
       return aMs - bMs;
     });
 
-    return { readyGames: ready, scheduledGames: scheduledFuture };
-  }, [visiblePatientAssignments, now]);
+    return { readyGames: practiceReady, scheduledGames: scheduledAll };
+  }, [visiblePatientAssignments, startOfToday]);
 
   const canStartGame = (g) => {
     const dueMs = g?.dueAt ? new Date(g.dueAt).getTime() : NaN;
@@ -383,16 +376,15 @@ export default function Games() {
           <section className="lg:col-span-2 bg-gray-800 p-6 rounded shadow space-y-4">
             <div>
               <h1 className="text-2xl font-bold">Games</h1>
-              <p className="text-gray-300">Practice what you already have and see upcoming assignments. Scheduled games move over automatically on their date.</p>
+              <p className="text-gray-300">Practice games live here. Scheduled assignments stay on the right and unlock on their due date.</p>
             </div>
             {patientLoading ? (
               <p className="text-gray-400 text-sm">Loading assigned games...</p>
             ) : readyGames.length === 0 ? (
-              <p className="text-gray-400 text-sm">No games ready right now. Check Scheduled for what is coming up.</p>
+              <p className="text-gray-400 text-sm">No practice games right now. Check Scheduled for assigned games.</p>
             ) : (
               <ul className="space-y-3">
                 {readyGames.map((g) => {
-                  const dueAt = g.dueAt ? new Date(g.dueAt) : null;
                   const completed = completionStatus(g);
                   const isPractice = !g.dueAt;
                   const canStart = canStartGame(g);
@@ -426,7 +418,7 @@ export default function Games() {
           <aside className="bg-gray-800 p-6 rounded shadow space-y-3">
             <div>
               <h3 className="text-lg font-semibold">Scheduled</h3>
-              <p className="text-sm text-gray-400">New assignments appear here first. A live timer shows when they unlock.</p>
+              <p className="text-sm text-gray-400">Assignments appear here first. A live timer shows when they unlock, and overdue items are marked in red.</p>
             </div>
             {patientLoading ? (
               <p className="text-gray-400 text-sm">Loading scheduled games...</p>
@@ -436,9 +428,19 @@ export default function Games() {
               <ul className="space-y-3">
                 {scheduledGames.map((s) => {
                   const dueLabel = s.dueAt ? new Date(s.dueAt).toLocaleString() : 'Scheduled';
-                  const countdown = countdownFor(s.dueAt);
-                  const disabled = !canStartGame(s);
                   const completed = completionStatus(s);
+                  const dueMs = s?.dueAt ? new Date(s.dueAt).getTime() : NaN;
+                  const overdue = Number.isFinite(dueMs) && dueMs < startOfToday.getTime() && !completed?.completedToday;
+                  const countdown = countdownFor(s.dueAt);
+                  const statusText = completed?.completedToday
+                    ? 'Performed today'
+                    : overdue
+                      ? 'Overdue'
+                      : countdown === 'Ready now'
+                        ? 'Ready now'
+                        : `Starts in ${countdown}`;
+                  const statusClass = overdue ? 'text-red-400' : 'text-indigo-300';
+                  const disabled = !canStartGame(s);
                   return (
                     <li key={s._id || s.id} className="p-3 bg-gray-900 rounded border border-gray-700">
                       <div className="flex items-start justify-between gap-3">
@@ -446,7 +448,7 @@ export default function Games() {
                           <div className="font-semibold">{s.title}</div>
                           <div className="text-xs text-gray-400">Game: {s.metadata?.gameKey || 'game'}</div>
                           <div className="text-xs text-gray-400 mt-1">Scheduled for {dueLabel}</div>
-                          <div className="text-[11px] text-indigo-300 mt-1">{completed?.completedToday ? 'Performed today' : `Starts in ${countdown}`}</div>
+                          <div className={`text-[11px] mt-1 ${statusClass}`}>{statusText}</div>
                         </div>
                         <button
                           onClick={() => startGame(s)}

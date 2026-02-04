@@ -4,6 +4,41 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import UnreadBadge from "../components/UnreadBadge";
 import TrendChart from "../components/TrendChart";
+import ExerciseCharts from "../components/ExerciseCharts";
+
+const toDate = (value) => (value ? new Date(value) : null);
+const fmtDate = (value) => {
+  const d = toDate(value);
+  return d ? d.toLocaleDateString() : '--';
+};
+const fmtTime = (value) => {
+  const d = toDate(value);
+  return d ? d.toLocaleTimeString() : '--';
+};
+const fmtDateTime = (value) => {
+  const d = toDate(value);
+  return d ? d.toLocaleString() : '--';
+};
+const safeFilename = (value) => String(value || 'report')
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-')
+  .replace(/(^-|-$)/g, '');
+const inferPoseType = (r) => {
+  const meta = r?.metadata || {};
+  const pose = String(meta.poseType || meta.poseMetrics?.poseType || '').toLowerCase();
+  if (pose) return pose;
+  const title = String(meta.exerciseTitle || r.title || '').toLowerCase();
+  if (title.includes('tpose') || title.includes('t-pose') || title.includes('t pose')) return 'tpose';
+  if (title.includes('squat')) return 'squat';
+  return '';
+};
+const labelForGame = (gameKey) => {
+  const key = String(gameKey || '').toLowerCase();
+  if (key === 'memory') return 'Memory Match';
+  if (key === 'stroop') return 'Stroop Test';
+  return key || null;
+};
+const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
 
 export default function TherapistDashboard() {
   const { user, authFetch, logout, notificationsUnread, messagesUnread } = useAuth();
@@ -15,7 +50,6 @@ export default function TherapistDashboard() {
   const [schedule, setSchedule] = useState([]);
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [selectedDateExercise, setSelectedDateExercise] = useState(() => new Date().toISOString().slice(0, 10));
   const [selectedDateCognitive, setSelectedDateCognitive] = useState(() => new Date().toISOString().slice(0, 10));
   const [therapistLink, setTherapistLink] = useState({ patientId: '', status: '' });
   const [removeLink, setRemoveLink] = useState({ patientId: '', status: '' });
@@ -23,7 +57,6 @@ export default function TherapistDashboard() {
   const [patientHeartRateFallback, setPatientHeartRateFallback] = useState(null);
   const [patientHeartRateSource, setPatientHeartRateSource] = useState(null);
   const [patientFitbitStatus, setPatientFitbitStatus] = useState('idle'); // idle | checking | connected | not-connected | error
-  const [showAvailableDebug, setShowAvailableDebug] = useState(false);
   const navigate = useNavigate();
   const { push } = useToast();
 
@@ -161,27 +194,222 @@ export default function TherapistDashboard() {
     }
   };
 
-  const exportCsvForPatient = async (patientId) => {
-    try {
-      const url = `http://localhost:5000/api/reports/export.csv?userId=${patientId || ''}`;
-      const r = await authFetch(url);
-      const blob = await r.blob();
-      const downloadUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = patientId ? `results-${patientId}.csv` : 'results-export.csv';
-      a.click();
-      URL.revokeObjectURL(downloadUrl);
-    } catch (e) {
-      console.error('Export CSV failed', e);
-      alert('Failed to export CSV');
-    }
+  const buildQuickReportHtml = ({ patient, therapistName, results, periodLabel }) => {
+    const list = Array.isArray(results) ? results : [];
+    const lastActivity = (() => {
+      if (!list.length) return null;
+      const sorted = [...list].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      return sorted[0]?.createdAt || null;
+    })();
+    const cognitiveResults = list.filter((r) => r.type === 'cognitive');
+    const physicalResults = list.filter((r) => r.type === 'physical');
+    const tposeResults = physicalResults.filter((r) => inferPoseType(r) === 'tpose');
+    const squatResults = physicalResults.filter((r) => inferPoseType(r) === 'squat');
+
+    const cognitiveScores = cognitiveResults.map((r) => r.score).filter((v) => Number.isFinite(v));
+    const avgCognitiveScore = cognitiveScores.length ? Math.round(avg(cognitiveScores)) : '--';
+    const bestCognitiveScore = cognitiveScores.length ? Math.max(...cognitiveScores) : '--';
+    const latestCognitiveScore = (() => {
+      if (!cognitiveResults.length) return '--';
+      const sorted = [...cognitiveResults].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      return sorted[0]?.score ?? '--';
+    })();
+
+    const tposeTimes = tposeResults.map((r) => (r.metadata?.poseMetrics?.timeInTargetMs || 0) / 1000);
+    const tposeBreaks = tposeResults.map((r) => r.metadata?.poseMetrics?.outOfRangeCount || 0);
+    const avgTposeTime = tposeTimes.length ? Math.round(avg(tposeTimes)) : 0;
+    const avgTposeBreaks = tposeBreaks.length ? Math.round(avg(tposeBreaks)) : 0;
+    const bestTposeTime = tposeTimes.length ? Math.round(Math.max(...tposeTimes)) : 0;
+
+    const totalSquatCorrect = squatResults.reduce((sum, r) => sum + (r.metadata?.poseMetrics?.correctReps || 0), 0);
+    const totalSquatIncorrect = squatResults.reduce((sum, r) => sum + (r.metadata?.poseMetrics?.incorrectReps || 0), 0);
+    const totalSquatReps = totalSquatCorrect + totalSquatIncorrect;
+    const squatAccuracy = totalSquatReps > 0 ? Math.round((totalSquatCorrect / totalSquatReps) * 100) : 0;
+
+    const sessionRows = list
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .map((r) => {
+        const meta = r.metadata || {};
+        const poseType = inferPoseType(r);
+        const gameLabel = labelForGame(meta.gameKey);
+        const exerciseLabel = meta.exerciseTitle || gameLabel || r.title || r.type || 'Session';
+        let keyResult = '--';
+        if (poseType === 'tpose') {
+          const sec = Math.round(((meta.poseMetrics?.timeInTargetMs || 0) / 1000));
+          const breaks = meta.poseMetrics?.outOfRangeCount ?? 0;
+          keyResult = `${sec} s / ${breaks} breaks`;
+        } else if (poseType === 'squat') {
+          const correct = meta.poseMetrics?.correctReps || 0;
+          const incorrect = meta.poseMetrics?.incorrectReps || 0;
+          const total = correct + incorrect;
+          keyResult = `${correct}/${total} correct`;
+        } else if (r.type === 'cognitive') {
+          const score = r.score ?? '--';
+          if (String(meta.gameKey || '').toLowerCase() === 'stroop' && meta.avgRTms != null) {
+            keyResult = `Score ${score} - Avg RT ${meta.avgRTms} ms`;
+          } else if (String(meta.gameKey || '').toLowerCase() === 'memory' && meta.moves != null) {
+            keyResult = `Score ${score} - ${meta.moves} moves`;
+          } else {
+            keyResult = `Score ${score}`;
+          }
+        } else if (r.score != null) {
+          keyResult = `Score ${r.score}`;
+        }
+        return {
+          date: fmtDate(r.createdAt),
+          time: fmtTime(r.createdAt),
+          exercise: exerciseLabel,
+          keyResult,
+          status: 'Completed'
+        };
+      });
+
+    const summaryRows = [
+      ['Patient', patient?.name || 'Patient'],
+      ['Age', patient?.age ?? '--'],
+      ['Report period', periodLabel],
+      ['Last activity', lastActivity ? fmtDateTime(lastActivity) : '--'],
+      ['Therapist', therapistName || 'Therapist']
+    ];
+    const cognitiveRows = [
+      ['Total cognitive sessions', cognitiveResults.length],
+      ['Average cognitive score', avgCognitiveScore],
+      ['Best cognitive score', bestCognitiveScore],
+      ['Latest cognitive score', latestCognitiveScore]
+    ];
+    const tposeRows = [
+      ['Total T-pose sessions', tposeResults.length],
+      ['Average correct pose duration (s)', avgTposeTime],
+      ['Average posture deviations', avgTposeBreaks],
+      ['Best session time in pose (s)', bestTposeTime]
+    ];
+    const squatRows = [
+      ['Total squat sessions', squatResults.length],
+      ['Squat accuracy', `${squatAccuracy}%`],
+      ['Total correct squats', totalSquatCorrect],
+      ['Total incorrect squats', totalSquatIncorrect]
+    ];
+
+    const table = (title, rows) => `
+      <h3>${title}</h3>
+      <table>
+        <tbody>
+          ${rows.map((r) => `<tr><th>${r[0]}</th><td>${r[1]}</td></tr>`).join('')}
+        </tbody>
+      </table>
+    `;
+
+    const sessionRowsHtml = sessionRows.map((row) => `
+      <tr>
+        <td>${row.date}</td>
+        <td>${row.time}</td>
+        <td>${row.exercise}</td>
+        <td>${row.keyResult}</td>
+        <td>${row.status}</td>
+      </tr>
+    `).join('');
+
+    return `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${patient?.name || 'Patient'} - Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #0f172a; }
+            h1 { font-size: 22px; margin-bottom: 8px; }
+            h2 { font-size: 16px; margin-top: 24px; }
+            h3 { font-size: 14px; margin-top: 16px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+            th, td { border: 1px solid #e2e8f0; padding: 6px 8px; font-size: 12px; text-align: left; }
+            th { background: #f8fafc; width: 40%; }
+            .note { font-size: 12px; color: #475569; margin-top: 6px; }
+          </style>
+        </head>
+        <body>
+          <h1>${patient?.name || 'Patient'} - Patient Report</h1>
+          <div class="note">Generated ${new Date().toLocaleString()}</div>
+          ${table('Patient Overview', summaryRows)}
+          ${table('Cognitive Rehabilitation Summary', cognitiveRows)}
+          ${table('T-Pose Exercise Summary', tposeRows)}
+          ${table('Squat Exercise Summary', squatRows)}
+          <h2>Exercise Session Log</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Exercise</th>
+                <th>Key Result</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${sessionRowsHtml || '<tr><td colspan="5">No sessions found for this period.</td></tr>'}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
   };
 
-  const generatePdfForPatient = (patientId) => {
-    // Open the CSV in a new tab; user can print to PDF from browser.
-    const url = `http://localhost:5000/api/reports/export.csv?userId=${patientId || ''}`;
-    window.open(url, '_blank');
+  const downloadQuickReportExcel = async () => {
+    if (!selectedPatient?._id) {
+      push('Select a patient first', 'error');
+      return;
+    }
+    let list = recentResults;
+    if (!list.length) {
+      try {
+        const res = await authFetch(`http://localhost:5000/api/results?userId=${selectedPatient._id}`);
+        const data = await res.json();
+        list = data.success ? (data.results || []) : [];
+      } catch (e) {
+        console.error('quick report fetch failed', e);
+      }
+    }
+    const html = buildQuickReportHtml({
+      patient: selectedPatient,
+      therapistName: user?.name || 'Therapist',
+      results: list,
+      periodLabel: 'All time'
+    });
+    const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${safeFilename(selectedPatient.name)}-quick-report.xls`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadQuickReportPdf = async () => {
+    if (!selectedPatient?._id) {
+      push('Select a patient first', 'error');
+      return;
+    }
+    let list = recentResults;
+    if (!list.length) {
+      try {
+        const res = await authFetch(`http://localhost:5000/api/results?userId=${selectedPatient._id}`);
+        const data = await res.json();
+        list = data.success ? (data.results || []) : [];
+      } catch (e) {
+        console.error('quick report fetch failed', e);
+      }
+    }
+    const html = buildQuickReportHtml({
+      patient: selectedPatient,
+      therapistName: user?.name || 'Therapist',
+      results: list,
+      periodLabel: 'All time'
+    });
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 400);
   };
 
   const assignTherapistToPatient = async () => {
@@ -362,12 +590,6 @@ export default function TherapistDashboard() {
   const patientHrDisplay = patientHeartRate ?? patientHeartRateFallback?.bpm ?? '--';
   const patientHrStale = (patientHeartRateSource && patientHeartRateSource.includes('cached')) || (patientHeartRateSource || '').startsWith('summary') || (!patientHeartRate && !!patientHeartRateFallback);
 
-  // compute daily filtered summaries for selected date
-  const exerciseForDate = (date) => recentResults.filter(r => {
-    if (!r.createdAt) return false;
-    const d = new Date(r.createdAt).toISOString().slice(0, 10);
-    return d === date && (r.type === 'exercise' || r.type === 'physical');
-  });
   const cognitiveForDate = (date) => recentResults.filter(r => {
     if (!r.createdAt) return false;
     const d = new Date(r.createdAt).toISOString().slice(0, 10);
@@ -479,29 +701,42 @@ export default function TherapistDashboard() {
                     {loadingResults ? (
                       <div className="w-full h-40 flex items-center justify-center">Loading...</div>
                       ) : (
-                      <TrendChart label="Cognitive trends" color="#10B981" data={recentResults} types={["game","cognitive"]} limit={60} height={320} yLabel="Score" showHeader={true} />
+                      <TrendChart
+                        label="Cognitive trends"
+                        color="#10B981"
+                        data={recentResults}
+                        types={["game","cognitive"]}
+                        limit={60}
+                        height={320}
+                        yLabel="Score"
+                        showHeader={true}
+                        showFullLabel={true}
+                        tooltipLines={(raw, value) => ([
+                          `Score: ${value}`,
+                          (() => {
+                            const key = raw?.metadata?.gameKey || raw?.gameKey || '';
+                            if (!key) return null;
+                            const label = key === 'memory' ? 'Memory Match' : key === 'stroop' ? 'Stroop Test' : key;
+                            return `Game: ${label}`;
+                          })(),
+                          raw?.metadata?.avgRTms != null ? `Avg RT: ${raw.metadata.avgRTms} ms` : null,
+                          raw?.metadata?.moves != null ? `Moves: ${raw.metadata.moves}` : null,
+                          raw?.metadata?.timeSeconds != null ? `Time: ${raw.metadata.timeSeconds}s` : null,
+                          raw?.metadata?.trials != null ? `Trials: ${raw.metadata.trials}` : null,
+                          raw?.createdAt ? new Date(raw.createdAt).toLocaleString() : null
+                        ].filter(Boolean))}
+                      />
                     )}
                   </div>
 
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-sm text-gray-200 font-semibold">Exercise trends</div>
-                      <div className="flex items-center gap-3">
-                        <label className="text-xs text-gray-300">Date</label>
-                        <input type="date" value={selectedDateExercise} onChange={(e)=>setSelectedDateExercise(e.target.value)} className="bg-gray-700 text-sm text-gray-100 px-2 py-1 rounded" />
-                      </div>
-                    </div>
-                    <div className="text-xs text-gray-300 mb-2">
-                      {(() => {
-                        const list = exerciseForDate(selectedDateExercise);
-                        if (!list.length) return (<div className="text-xs text-gray-400">No exercises on {selectedDateExercise}.</div>);
-                        return (<div>Items: {list.length} • Avg: {Math.round((list.reduce((s,r)=>s+(r.score||0),0)/list.length)||0)}</div>);
-                      })()}
                     </div>
                     {loadingResults ? (
                       <div className="w-full h-40 flex items-center justify-center">Loading...</div>
                     ) : (
-                      <TrendChart label="Exercise trends" color="#8B5CF6" data={recentResults} types={["exercise","physical"]} limit={60} height={320} yLabel="Score" showHeader={true} />
+                      <ExerciseCharts results={recentResults} compact />
                     )}
                   </div>
                 </div>
@@ -604,8 +839,8 @@ export default function TherapistDashboard() {
             <div className="bg-gradient-to-br from-indigo-700 to-purple-600 rounded-lg p-4 shadow">
               <h4 className="text-sm text-white">Quick reports</h4>
                 <div className="mt-3 space-y-2">
-                <button onClick={() => exportCsvForPatient(selectedPatient?._id)} className="w-full bg-white/10 text-white px-3 py-2 rounded text-sm">Export CSV</button>
-                <button onClick={() => generatePdfForPatient(selectedPatient?._id)} className="w-full bg-white/10 text-white px-3 py-2 rounded text-sm">Generate PDF</button>
+                <button onClick={downloadQuickReportExcel} className="w-full bg-white/10 text-white px-3 py-2 rounded text-sm">Download Excel</button>
+                <button onClick={downloadQuickReportPdf} className="w-full bg-white/10 text-white px-3 py-2 rounded text-sm">Download PDF</button>
               </div>
             </div>
 
@@ -618,13 +853,9 @@ export default function TherapistDashboard() {
                 </select>
                 <button onClick={assignTherapistToPatient} className="bg-green-600 px-3 py-2 rounded text-sm whitespace-nowrap">Assign</button>
               </div>
-              <div className="text-xs text-gray-400 mt-2 flex items-center justify-between">
-                <div>Available patients: <span className="font-medium text-gray-200">{availablePatients.length}</span></div>
-                <button onClick={()=>setShowAvailableDebug(s=>!s)} className="text-indigo-300 underline text-xs">{showAvailableDebug ? 'Hide details' : 'Show details'}</button>
+              <div className="text-xs text-gray-400 mt-2">
+                Available patients: <span className="font-medium text-gray-200">{availablePatients.length}</span>
               </div>
-              {showAvailableDebug && (
-                <pre className="text-xs bg-gray-900 p-2 rounded mt-2 overflow-auto max-h-40">{JSON.stringify(availablePatients, null, 2)}</pre>
-              )}
               {therapistLink.status && <div className="text-xs text-gray-300 mt-1">{therapistLink.status}</div>}
               <div className="text-[11px] text-gray-400 mt-1">Patient will get a request and must accept you as their therapist.</div>
             </div>

@@ -23,7 +23,7 @@ const upload = multer({ dest: uploadsDir });
 const poseMetricsSchema = z.object({
   reps: z.number().min(0),
   lastAngle: z.number().nullable().optional(),
-  state: z.enum(["up", "down", "unknown"]).optional(),
+  state: z.enum(["up", "down", "unknown", "hold"]).optional(),
   samples: z.array(z.number()).optional(),
   // Extended metrics for physical progress
   minAngle: z.number().optional(),
@@ -35,6 +35,7 @@ const poseMetricsSchema = z.object({
   quality: z.array(z.number()).optional(),
   correctReps: z.number().optional(),
   incorrectReps: z.number().optional(),
+  outOfRangeCount: z.number().optional(),
 }).strict().optional();
 
 const metadataSchema = z.object({

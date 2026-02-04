@@ -9,7 +9,7 @@ export default function ExerciseRunner() {
   const navigate = useNavigate();
   const loc = useLocation();
   const ex = loc.state?.exercise;
-  const { user } = useAuth();
+  // `user` not needed in this component
 
   const [running, setRunning] = useState(false);
   const [timeLeft, setTimeLeft] = useState(60);
@@ -19,7 +19,9 @@ export default function ExerciseRunner() {
   const [includeVideo, setIncludeVideo] = useState(false);
   const [enablePose, setEnablePose] = useState(false);
   const [recordingBlobUrl, setRecordingBlobUrl] = useState(null);
+  const [finished, setFinished] = useState(false);
   const [autoSubmitted, setAutoSubmitted] = useState(false);
+  const [saveStatus, setSaveStatus] = useState('idle'); // idle | saving | saved | error
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -47,12 +49,15 @@ export default function ExerciseRunner() {
     praised: false,
     correctReps: 0,
     incorrectReps: 0,
+    outOfRangeCount: 0,
+    prevInRange: null,
+    pendingRepScore: null,
   });
   const poseMetricsRef = useRef(makePoseMetrics());
   const repQualityRef = useRef([]);
-  const [feedback, setFeedback] = useState({ level: 'info', message: 'Ready' });
+  const [, setFeedback] = useState({ level: 'info', message: 'Ready' });
   const [repStats, setRepStats] = useState({ correct: 0, incorrect: 0 });
-  const [backend, setBackend] = useState('');
+  const [, setBackend] = useState('');
   const [poseDiag, setPoseDiag] = useState({ lastError: null, attempted: [], backend: null });
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [heartRate, setHeartRate] = useState(null);
@@ -81,10 +86,20 @@ export default function ExerciseRunner() {
 
   const markComplete = useCallback(async () => {
     try {
-      if (!ex || !ex._id) return;
-      await authFetch(`http://localhost:5000/api/exercises/${ex._id}/complete`, { method:'POST' });
-    } catch (e) { console.warn('markComplete failed', e); }
-  }, [authFetch, ex]);
+      if (!ex || !ex._id) return false;
+      const res = await authFetch(`http://localhost:5000/api/exercises/${ex._id}/complete`, { method:'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        push('Failed to mark exercise complete', 'error');
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.warn('markComplete failed', e);
+      push('Failed to mark exercise complete', 'error');
+      return false;
+    }
+  }, [authFetch, ex, push]);
 
   const speak = useCallback((text, opts = {}) => {
     try {
@@ -100,29 +115,41 @@ export default function ExerciseRunner() {
     } catch (_) {}
   }, [voiceEnabled]);
 
-  // Stable stopMedia handler (place before effects to avoid TDZ on first render)
+  // Stable stopPoseDetector and stopMedia handlers (place before effects to avoid TDZ on first render)
+  const stopPoseDetector = useCallback(async () => {
+    try {
+      if (poseLoopRef.current) cancelAnimationFrame(poseLoopRef.current);
+      if (detectorRef.current?.dispose) detectorRef.current.dispose();
+    } catch (e) { console.warn(e); }
+    detectorRef.current = null;
+    poseLoopRef.current = null;
+  }, []);
+
   const stopMedia = useCallback(() => {
     try { if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop(); } catch (e) {}
     try { if (mediaStreamRef.current) { mediaStreamRef.current.getTracks().forEach((t) => t.stop()); mediaStreamRef.current = null; } } catch (e) {}
     if (videoRef.current) videoRef.current.srcObject = null;
     // stop pose detector if running
     stopPoseDetector();
-  }, []);
+  }, [stopPoseDetector]);
 
   useEffect(() => {
     let t;
     if (running && timeLeft > 0) t = setInterval(() => setTimeLeft((s) => s - 1), 1000);
-    if (timeLeft === 0 && running) setRunning(false);
-    return () => clearInterval(t);
-  }, [running, timeLeft]);
-
-  // Auto-submit when timer ends
-  useEffect(() => {
-    if (!running && timeLeft === 0 && !autoSubmitted) {
-      setAutoSubmitted(true);
-      submitResult({ completed: true });
+    if (timeLeft === 0 && running) {
+      setRunning(false);
+      stopMedia();
+      setFinished(true);
+      setFeedback({ level: 'info', message: 'Session complete. Save results or restart.' });
+      push('Session complete. Save results or restart.', 'info');
+      if (!autoSubmitted) {
+        setAutoSubmitted(true);
+        submitResult({ completed: true, navigateOnSave: false, auto: true });
+      }
     }
-  }, [running, timeLeft, autoSubmitted]); // submitResult from scope
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, timeLeft, stopMedia, push, autoSubmitted]);
 
   // Stop media on unmount
   useEffect(() => {
@@ -266,16 +293,6 @@ export default function ExerciseRunner() {
     }
   }
 
-  async function stopPoseDetector() {
-    try {
-      if (poseLoopRef.current) cancelAnimationFrame(poseLoopRef.current);
-      if (detectorRef.current?.dispose) detectorRef.current.dispose();
-    } catch (e) { console.warn(e); }
-    detectorRef.current = null;
-    poseLoopRef.current = null;
-    poseMetricsRef.current = makePoseMetrics();
-  }
-
   async function poseFrame() {
     try {
       if (!detectorRef.current || !videoRef.current) return;
@@ -306,7 +323,7 @@ export default function ExerciseRunner() {
   function processPose(pose) {
     const cfg = getPoseConfig();
     const targetType = cfg.targets?.type;
-    const isStaticHold = targetType === 'tpose' || targetType === 'squat';
+    const isStaticHold = targetType === 'tpose';
     
     // Select keypoints based on joint config; choose the better-visible side
     const key = pose.keypoints || [];
@@ -364,18 +381,29 @@ export default function ExerciseRunner() {
 
       if (metrics.state === 'down' && smoothed < upThreshold) {
         metrics.state = 'up';
+        if (targetType === 'squat') {
+          const fb = evaluateForm(smoothed, cfg, key, { chosenSide, rawAngle: angle });
+          const score = fb.inRange ? 1 : 0.2;
+          metrics.pendingRepScore = score;
+        }
         // encourage user to lift further if near threshold
         if (smoothed < upThreshold - 10) speak(cfg.joints === 'arm' ? 'Raise your arm higher.' : 'Go lower.');
       } else if (metrics.state === 'up' && smoothed > downThreshold) {
         // Check debounce before counting rep
         if ((now - metrics.lastRepTime) > minRepTime) {
           // record quality for this rep
-          const fb = evaluateForm(smoothed, cfg, key, { chosenSide, rawAngle: angle });
-          const score = fb.level === 'good' ? 1 : fb.level === 'caution' ? 0.6 : 0.2;
+          let score;
+          if (targetType === 'squat' && typeof metrics.pendingRepScore === 'number') {
+            score = metrics.pendingRepScore;
+          } else {
+            const fb = evaluateForm(smoothed, cfg, key, { chosenSide, rawAngle: angle });
+            score = targetType === 'squat' ? (fb.inRange ? 1 : 0.2) : (fb.level === 'good' ? 1 : fb.level === 'caution' ? 0.6 : 0.2);
+          }
           repQualityRef.current.push(score);
           metrics.reps += 1;
           if (score >= 0.8) metrics.correctReps += 1; else metrics.incorrectReps += 1;
           metrics.lastRepTime = now;
+          metrics.pendingRepScore = null;
           setReps(metrics.reps);
           setRepStats({ correct: metrics.correctReps, incorrect: metrics.incorrectReps });
           speak('Good job!', { minGapMs: 1200 });
@@ -397,6 +425,16 @@ export default function ExerciseRunner() {
       : target
         ? (smoothed >= target[0] && smoothed <= target[1])
         : (cont.level === 'good');
+    if (targetType === 'squat' && metrics.state === 'up') {
+      if (isInRange) metrics.pendingRepScore = 1;
+      else if (metrics.pendingRepScore == null) metrics.pendingRepScore = 0.2;
+    }
+    if (targetType === 'tpose') {
+      if (metrics.prevInRange === true && !isInRange) {
+        metrics.outOfRangeCount += 1;
+      }
+      metrics.prevInRange = isInRange;
+    }
     if (isInRange) metrics.timeInTargetMs += dt;
     metrics.lastSampleTime = now2;
     // Speak only when level changes to avoid repeated chatter. Praise on entry to 'good'.
@@ -625,7 +663,10 @@ export default function ExerciseRunner() {
     const inRangeSec = (m.timeInTargetMs || 0) / 1000;
     const minA = isFinite(m.minAngle) ? m.minAngle.toFixed(0) : '--';
     const maxA = isFinite(m.maxAngle) ? m.maxAngle.toFixed(0) : '--';
-    ctx.fillText(`Angle: ${angle != null ? angle.toFixed(0) + ' deg' : '--'} | In-range: ${inRangeSec.toFixed(1)}s | Min/Max: ${minA}/${maxA} | Backend: ${backend || '...'}`, 8, 19);
+    const outCount = m.outOfRangeCount || 0;
+    const correct = m.correctReps || 0;
+    const incorrect = m.incorrectReps || 0;
+    ctx.fillText(`Angle: ${angle != null ? angle.toFixed(0) + ' deg' : '--'} | In-range: ${inRangeSec.toFixed(1)}s | Out-of-range: ${outCount} | Correct/Wrong: ${correct}/${incorrect} | Min/Max: ${minA}/${maxA}`, 8, 19);
 
     // Secondary line with target info
     ctx.font = 'bold 12px ui-sans-serif, system-ui, -apple-system';
@@ -660,11 +701,14 @@ export default function ExerciseRunner() {
     poseMetricsRef.current = makePoseMetrics();
     repQualityRef.current = [];
     setRepStats({ correct: 0, incorrect: 0 });
+    setReps(0);
     setFeedback((prev) => ({ ...prev, message: 'Starting...', level: 'info' }));
     setTimeLeft(initialTime);
     if (includeVideo) { await startMedia(); try { mediaRecorderRef.current?.start(); } catch (e) { console.warn('recorder start failed', e); } }
     setRunning(true);
+    setFinished(false);
     setAutoSubmitted(false);
+    setSaveStatus('idle');
     push('Exercise started', 'info');
   };
 
@@ -676,6 +720,9 @@ export default function ExerciseRunner() {
     poseMetricsRef.current = makePoseMetrics();
     repQualityRef.current = [];
     setRepStats({ correct: 0, incorrect: 0 });
+    setFinished(false);
+    setAutoSubmitted(false);
+    setSaveStatus('idle');
     stopMedia();
     setRecordingBlobUrl(null);
     setFeedback({ level: 'info', message: 'Reset. Ready when you are.' });
@@ -683,29 +730,65 @@ export default function ExerciseRunner() {
   };
   const handleStop = () => { setRunning(false); try { mediaRecorderRef.current?.stop(); } catch (e) {} stopMedia(); push('Stopped', 'info'); };
 
-  const submitResult = async ({ completed = true, score = null } = {}) => {
-    if (!ex) return push('No exercise selected', 'error');
-    try {
-  const poseMetrics = poseMetricsRef.current || { reps: 0 };
-  // finalize averages and cadence
-  const avgAngle = poseMetrics.sampleCount > 0 ? (poseMetrics.sumAngle / poseMetrics.sampleCount) : null;
-  const durationSec = Math.max(1, initialTime - timeLeft);
-  const cadence = reps / (durationSec / 60);
-  const metadata = {
-    reps,
-    difficulty,
-    duration: durationSec,
-    video: !!recordingBlobUrl,
-    poseMetrics: {
-      ...poseMetrics,
-      avgAngle: avgAngle ?? undefined,
-      cadence,
-      quality: repQualityRef.current,
-      correctReps: poseMetrics.correctReps ?? repStats.correct ?? undefined,
-      incorrectReps: poseMetrics.incorrectReps ?? repStats.incorrect ?? undefined
-    },
-    heartRate: heartRate ?? null
+  const handleRestart = async () => {
+    setRunning(false);
+    setTimeLeft(initialTime);
+    setReps(0);
+    poseMetricsRef.current = makePoseMetrics();
+    repQualityRef.current = [];
+    setRepStats({ correct: 0, incorrect: 0 });
+    setFinished(false);
+    setAutoSubmitted(false);
+    setSaveStatus('idle');
+    stopMedia();
+    setRecordingBlobUrl(null);
+    setFeedback({ level: 'info', message: 'Restarting...' });
+    if (includeVideo) { await startMedia(); try { mediaRecorderRef.current?.start(); } catch (e) { console.warn('recorder start failed', e); } }
+    setRunning(true);
+    push('Exercise restarted', 'info');
   };
+
+  const submitResult = async ({ completed = true, score = null, navigateOnSave = true, auto = false } = {}) => {
+    if (!ex) return push('No exercise selected', 'error');
+    if (saveStatus === 'saved') {
+      if (!auto) push('Results already saved for this session.', 'info');
+      return true;
+    }
+    let saved = false;
+    try {
+      setSaveStatus('saving');
+      const poseMetricsRaw = poseMetricsRef.current || { reps: 0 };
+      // finalize averages and cadence
+      const avgAngle = poseMetricsRaw.sampleCount > 0 ? (poseMetricsRaw.sumAngle / poseMetricsRaw.sampleCount) : null;
+      const durationSec = Math.max(1, initialTime - timeLeft);
+      const cadence = reps / (durationSec / 60);
+      const poseType = ex?.poseConfig?.targets?.type
+        || (/t-?pose/i.test(ex?.title || '') ? 'tpose' : /squat/i.test(ex?.title || '') ? 'squat' : undefined);
+      const poseMetrics = {
+        reps: poseMetricsRaw.reps ?? reps,
+        lastAngle: Number.isFinite(poseMetricsRaw.lastAngle) ? poseMetricsRaw.lastAngle : undefined,
+        state: poseMetricsRaw.state || undefined,
+        minAngle: Number.isFinite(poseMetricsRaw.minAngle) ? poseMetricsRaw.minAngle : undefined,
+        maxAngle: Number.isFinite(poseMetricsRaw.maxAngle) ? poseMetricsRaw.maxAngle : undefined,
+        avgAngle: avgAngle ?? undefined,
+        timeInTargetMs: Number.isFinite(poseMetricsRaw.timeInTargetMs) ? poseMetricsRaw.timeInTargetMs : undefined,
+        usedSide: poseMetricsRaw.usedSide || undefined,
+        cadence,
+        quality: repQualityRef.current,
+        correctReps: poseMetricsRaw.correctReps ?? repStats.correct ?? undefined,
+        incorrectReps: poseMetricsRaw.incorrectReps ?? repStats.incorrect ?? undefined,
+        outOfRangeCount: typeof poseMetricsRaw.outOfRangeCount === 'number' ? poseMetricsRaw.outOfRangeCount : undefined
+      };
+      const metadata = {
+        reps,
+        difficulty,
+        duration: durationSec,
+        video: !!recordingBlobUrl,
+        poseMetrics,
+        poseType,
+        exerciseTitle: ex?.title || undefined,
+        heartRate: heartRate ?? null
+      };
       const payload = { exerciseId: ex._id || ex.id || 'unknown', type: 'physical', score: score ?? Math.round((reps / Math.max(1, initialTime)) * 100), metadata };
       if (recordingBlobUrl) {
         const blobResp = await fetch(recordingBlobUrl);
@@ -715,17 +798,23 @@ export default function ExerciseRunner() {
         fd.append('payload', JSON.stringify(payload));
         const res = await authFetch('http://localhost:5000/api/results/upload', { method: 'POST', body: fd });
         const data = await res.json();
-        if (data.success) { push('Result uploaded', 'success'); await markComplete(); } else push('Upload failed', 'error');
+        if (data.success) { push('Result uploaded', 'success'); saved = true; await markComplete(); } else push('Upload failed', 'error');
       } else {
         const res = await authFetch('http://localhost:5000/api/results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await res.json();
-        if (data.success) { push('Result saved', 'success'); await markComplete(); } else push('Failed to save result', 'error');
+        if (data.success) { push('Result saved', 'success'); saved = true; await markComplete(); } else push('Failed to save result', 'error');
       }
     } catch (err) {
       console.error('Submit result error', err);
       push('Error submitting result', 'error');
     }
-    navigate('/exercises');
+    if (saved) {
+      setSaveStatus('saved');
+      if (navigateOnSave) navigate('/exercises', { state: { refresh: true } });
+    } else {
+      setSaveStatus('error');
+    }
+    return saved;
   };
 
   if (!ex) return <main className="min-h-screen p-8 bg-gray-900 text-gray-100"><div className="max-w-2xl mx-auto">No exercise selected</div></main>;
@@ -745,6 +834,12 @@ export default function ExerciseRunner() {
       </main>
     );
   }
+
+  const liveMetrics = poseMetricsRef.current || {};
+  const inRangeSec = ((liveMetrics.timeInTargetMs || 0) / 1000);
+  const outOfRangeCount = liveMetrics.outOfRangeCount || 0;
+  const correctCount = liveMetrics.correctReps ?? repStats.correct;
+  const incorrectCount = liveMetrics.incorrectReps ?? repStats.incorrect;
 
   return (
     <main className="min-h-screen h-screen bg-gray-900 text-gray-100">
@@ -848,16 +943,46 @@ export default function ExerciseRunner() {
                   <span className="text-gray-400">Checking...</span>
                 )}
               </div>
+              <div className="mt-2 text-xs text-gray-300">
+                <div>In-range time: {inRangeSec.toFixed(1)}s</div>
+                <div>Out-of-range count: {outOfRangeCount}</div>
+                <div>Correct squats: {correctCount} | Wrong squats: {incorrectCount}</div>
+              </div>
             </div>
             <div className="flex gap-2 mb-2">
-              {!running ? (
+              {!finished && (!running ? (
                 <button onClick={handleStart} className="bg-green-600 px-3 py-2 rounded">Start</button>
               ) : (
                 <button onClick={handlePause} className="bg-yellow-500 px-3 py-2 rounded">Pause</button>
-              )}
-              <button onClick={handleStop} className="bg-red-600 px-3 py-2 rounded">Stop</button>
+              ))}
+              {!finished && <button onClick={handleStop} className="bg-red-600 px-3 py-2 rounded">Stop</button>}
               <button onClick={handleReset} className="bg-gray-700 px-3 py-2 rounded">Reset</button>
             </div>
+            {finished && (
+              <div className="mb-2 p-3 rounded border border-green-700 bg-gray-800">
+                <div className="font-semibold text-green-300">Session complete</div>
+                <div className="text-xs text-gray-300 mt-1">
+                  {saveStatus === 'saving'
+                    ? 'Saving results...'
+                    : saveStatus === 'saved'
+                      ? 'Results saved and sent to your therapist.'
+                      : saveStatus === 'error'
+                        ? 'Failed to save results. Please try again.'
+                        : 'Results are ready to save.'}
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <button onClick={handleRestart} className="bg-indigo-600 px-3 py-2 rounded">Restart</button>
+                  <button
+                    onClick={()=>submitResult({completed:true, navigateOnSave:false})}
+                    disabled={saveStatus === 'saving' || saveStatus === 'saved'}
+                    className={`px-3 py-2 rounded ${saveStatus === 'saving' || saveStatus === 'saved' ? 'bg-gray-700 text-gray-400' : 'bg-green-600 text-white'}`}
+                  >
+                    {saveStatus === 'saved' ? 'Saved' : 'Save Results'}
+                  </button>
+                  <button onClick={()=>navigate('/exercises', { state: { refresh: true } })} className="bg-gray-700 px-3 py-2 rounded">Exit</button>
+                </div>
+              </div>
+            )}
 
             <div className="mb-2">
               <div className="text-sm">Recorded video</div>
@@ -882,7 +1007,13 @@ export default function ExerciseRunner() {
 
         <section className="flex gap-2 justify-end">
           <button onClick={()=>navigate('/exercises')} className="bg-gray-700 px-4 py-2 rounded">Back</button>
-          <button onClick={()=>submitResult({completed:true})} className="bg-green-600 px-4 py-2 rounded">Mark Complete & Save</button>
+          <button
+            onClick={()=>submitResult({completed:true})}
+            disabled={saveStatus === 'saving' || saveStatus === 'saved'}
+            className={`px-4 py-2 rounded ${saveStatus === 'saving' || saveStatus === 'saved' ? 'bg-gray-700 text-gray-400' : 'bg-green-600 text-white'}`}
+          >
+            {saveStatus === 'saved' ? 'Saved' : saveStatus === 'saving' ? 'Saving...' : 'Save Results'}
+          </button>
         </section>
       </div>
     </main>
