@@ -6,7 +6,7 @@ export default function Messages() {
   const [inbox, setInbox] = useState([]);
   const [sent, setSent] = useState([]);
   const [tab, setTab] = useState('inbox');
-  const [users, setUsers] = useState([]); // simple recipient picker for therapists: pull from patients API
+  const [users, setUsers] = useState([]);
   const [newMsg, setNewMsg] = useState({ to: '', subject: '', body: '' });
   const [loading, setLoading] = useState(false);
   const [autoRecipientLoaded, setAutoRecipientLoaded] = useState(false);
@@ -49,7 +49,6 @@ export default function Messages() {
 
   const send = async (e) => {
     e.preventDefault();
-    // For patients, rely on auto-assigned therapist; if missing, abort
     if (user?.role === 'patient' && !newMsg.to) return;
     if (!newMsg.to || !newMsg.body) return;
     setLoading(true);

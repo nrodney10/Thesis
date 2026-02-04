@@ -27,16 +27,21 @@ export default function TherapistNotifications(){
       const r = await authFetch('http://localhost:5000/api/patients/respond-patient', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action, patientId }) });
       const j = await r.json();
       if (j.success) {
-        // mark notification read and refresh inbox/patients
         await markRead(notif._id);
         const nbox = inbox.filter(i => i._id !== notif._id);
         setInbox(nbox);
-        // refresh patients list by reloading page data
-        try { const r2 = await authFetch('http://localhost:5000/api/patients'); const j2 = await r2.json(); if (j2.success) setPatients(j2.patients||[]); } catch(_){}
+        try {
+          const r2 = await authFetch('http://localhost:5000/api/patients');
+          const j2 = await r2.json();
+          if (j2.success) setPatients(j2.patients||[]);
+        } catch (_) {}
       } else {
         alert(j.message || 'Failed');
       }
-    } catch (e) { console.error('respond patient request', e); alert('Error'); }
+    } catch (e) {
+      console.error('respond patient request', e);
+      alert('Error');
+    }
   };
 
   return (

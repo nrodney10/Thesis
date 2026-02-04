@@ -11,13 +11,11 @@ const Login = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
 
-  // Prefill email from previous successful login so user only types password next time
   useEffect(() => {
     try {
       const last = localStorage.getItem('lastEmail');
       if (last) {
         setEmail(last);
-        // focus password for quick login
         setTimeout(() => passwordRef.current?.focus(), 0);
       }
     } catch (_) {}
@@ -37,13 +35,9 @@ const Login = () => {
       const data = await res.json();
 
       if (res.ok && data.success) {
-        // Use centralized auth login
         login({ token: data.token, user: data.user, remember });
-
-        // Persist last used email for next time (does not store password)
         try { localStorage.setItem('lastEmail', email); } catch (_) {}
 
-        // Redirect based on role
         const role = data.user?.role;
         if (role === "therapist") navigate("/therapist");
         else navigate("/patient");

@@ -8,7 +8,6 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (!user) {
-      // silently redirect to login if not authenticated
       navigate("/login");
     }
   }, [user, navigate]);
@@ -24,7 +23,6 @@ const Dashboard = () => {
 
         <button
           onClick={() => {
-            // logout handled elsewhere; navigate to login
             navigate("/login");
           }}
           className="mt-6 bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-lg"

@@ -98,9 +98,9 @@ export default function FitbitDiagnostics() {
         <button onClick={runRefresh} className="px-3 py-1 bg-green-600 rounded text-sm" disabled={loadingRefresh}>{loadingRefresh ? 'Refreshing…' : 'Force Refresh'}</button>
         <button onClick={openReconnect} className="px-3 py-1 bg-indigo-400 rounded text-sm">Reconnect</button>
         <button onClick={doDisconnect} className="px-3 py-1 bg-red-600 rounded text-sm" disabled={disconnecting}>{disconnecting ? 'Disconnecting…' : 'Disconnect'}</button>
-        <button onClick={fetchLatest} className="px-3 py-1 bg-gray-600 rounded text-sm">Get Latest HR</button>
-        <button onClick={fetchRaw} className="px-3 py-1 bg-gray-600 rounded text-sm">Get Raw HR</button>
-        <button onClick={fetchLastAvailable} className="px-3 py-1 bg-gray-600 rounded text-sm">Get Last Available</button>
+        <button onClick={fetchLatest} className="px-3 py-1 bg-gray-600 rounded text-sm" disabled={loadingLatest}>{loadingLatest ? 'Loading…' : 'Get Latest HR'}</button>
+        <button onClick={fetchRaw} className="px-3 py-1 bg-gray-600 rounded text-sm" disabled={loadingLatest}>{loadingLatest ? 'Loading…' : 'Get Raw HR'}</button>
+        <button onClick={fetchLastAvailable} className="px-3 py-1 bg-gray-600 rounded text-sm" disabled={loadingLatest}>{loadingLatest ? 'Loading…' : 'Get Last Available'}</button>
       </div>
 
       <div className="text-xs text-gray-300">

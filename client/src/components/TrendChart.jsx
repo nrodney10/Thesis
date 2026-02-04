@@ -36,13 +36,6 @@ export default function TrendChart({
     });
   }, [data, types, limit]);
 
-  const xRange = useMemo(() => {
-    if (!points.length) return null;
-    const min = Math.min(...points.map(p=>p.x));
-    const max = Math.max(...points.map(p=>p.x));
-    return { min, max };
-  }, [points]);
-
   const yRange = useMemo(() => {
     if (!points.length) return { min: 0, max: 100, ticks: [0,20,40,60,80,100] };
     const vals = points.map(p=>p.y);
@@ -69,11 +62,12 @@ export default function TrendChart({
   const padB = 44;
 
   // compute X positions by index to ensure even spacing and avoid timestamp clustering
-  const xPositions = points.map((p, i) => {
+  const xPositions = useMemo(() => points.map((p, i) => {
     if (points.length === 1) return padL + (vw - padL - padR) / 2;
     return padL + (i / Math.max(1, points.length - 1)) * (vw - padL - padR);
-  });
-  const scaleX = (vOrIndex) => {
+  }), [points, vw, padL, padR]);
+
+  const scaleX = React.useCallback((vOrIndex) => {
     // if passed a timestamp, fall back to index-based mapping by finding index
     if (typeof vOrIndex === 'number' && points.length && points.some(p => p.x === vOrIndex)) {
       const idx = points.findIndex(p => p.x === vOrIndex);
@@ -82,7 +76,7 @@ export default function TrendChart({
     // if passed an index
     if (typeof vOrIndex === 'number') return xPositions[vOrIndex] ?? (padL + (vw - padL - padR) / 2);
     return padL + (vw - padL - padR) / 2;
-  };
+  }, [points, xPositions, vw, padL, padR]);
   const scaleY = (v) => {
     if (yRange.max === yRange.min) return padT + (vh - padT - padB) / 2;
     return padT + (1 - (v - yRange.min) / (yRange.max - yRange.min)) * (vh - padT - padB);
@@ -136,7 +130,7 @@ export default function TrendChart({
       label: points[idx].label,
       key: `${points[idx].x}-${idx}`
     }));
-  }, [points, xPositions]);
+  }, [points, xPositions, scaleX]);
 
   const polyPoints = points.map((p,i) => `${xPositions[i]},${scaleY(p.y)}`).join(' ');
 

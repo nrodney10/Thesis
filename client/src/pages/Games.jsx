@@ -35,7 +35,7 @@ export default function Games() {
     load();
   }, [authFetch, push, user?.role]);
 
-  const fetchAssignments = async () => {
+  const fetchAssignments = React.useCallback(async () => {
     if (user?.role !== 'therapist') return;
     setAssignmentsLoading(true);
     try {
@@ -52,12 +52,11 @@ export default function Games() {
       push('Failed to load game assignments', 'error');
     }
     setAssignmentsLoading(false);
-  };
+  }, [authFetch, push, user?.role]);
 
   useEffect(() => {
     fetchAssignments();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.role]);
+  }, [user?.role, fetchAssignments]);
 
   useEffect(() => {
     const loadPatientAssignments = async () => {
@@ -163,12 +162,9 @@ export default function Games() {
 
   const canStartGame = (g) => {
     const dueMs = g?.dueAt ? new Date(g.dueAt).getTime() : NaN;
-    // Practice games (no due date) are always playable
     if (!Number.isFinite(dueMs)) return true;
-    // Scheduled games unlock at or after their due time
     if (dueMs > now.getTime()) return false;
     const completed = completionStatus(g);
-    // Prevent replaying a scheduled game on the same day
     if (completed?.completedToday) return false;
     return true;
   };

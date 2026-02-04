@@ -18,7 +18,7 @@ export default function Results() {
   const prefetched = location.state || {};
   const [patientName, setPatientName] = useState(null);
 
-  const fetchResults = async () => {
+  const fetchResults = React.useCallback(async () => {
     setLoading(true);
     try {
       const url = userId ? `http://localhost:5000/api/results?userId=${encodeURIComponent(userId)}` : `http://localhost:5000/api/results`;
@@ -26,7 +26,6 @@ export default function Results() {
       const data = await res.json();
       if (data.success) {
         const list = data.results || [];
-        // dedupe results by id
         const uniq = (() => {
           const seen = new Set();
           return list.filter(r => {
@@ -38,7 +37,6 @@ export default function Results() {
           });
         })();
         setResults(uniq);
-        // If viewing a specific patient's results (therapist clicked View Results), show all by default
         if (userId) setVisibleCount(uniq.length);
       }
     } catch (err) {
@@ -46,9 +44,9 @@ export default function Results() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [authFetch, userId]);
 
-  const fetchActivities = async () => {
+  const fetchActivities = React.useCallback(async () => {
     try {
       setActivitiesError(null);
       if (!user) return;
@@ -84,10 +82,9 @@ export default function Results() {
       console.error('fetchActivities error', e);
       setActivitiesError(String(e));
     }
-  };
+  }, [authFetch, user]);
 
   useEffect(() => {
-    // If results were prefetched by the therapist dashboard, use them and skip fetching
     if (prefetched.prefetchedResults) {
       const list = prefetched.prefetchedResults || [];
       const seen = new Set();
@@ -99,13 +96,11 @@ export default function Results() {
         return true;
       });
       setResults(uniq);
-      // show all when a therapist prefetched them for a patient
       if (userId) setVisibleCount(uniq.length);
     } else {
       fetchResults();
     }
 
-    // Fetch patient name when viewing a specific patient's results
     const fetchPatientName = async () => {
       try {
         if (!userId) return;
@@ -117,15 +112,12 @@ export default function Results() {
         if (!r.ok) return;
         const j = await r.json();
         if (j && j.success && j.patient) setPatientName(j.patient.name || null);
-      } catch (e) { /* ignore */ }
+      } catch (e) { }
     };
     fetchPatientName();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search]);
+  }, [location.search, fetchResults, authFetch, prefetched.prefetchedPatientName, prefetched.prefetchedResults, userId]);
 
-  // Fetch activities when the authenticated user becomes available
   useEffect(() => {
-    // If activities were prefetched by therapist dashboard, use them
     if (prefetched.prefetchedActivities) {
       const list = prefetched.prefetchedActivities || [];
       const seen = new Set();
@@ -140,9 +132,7 @@ export default function Results() {
     } else {
       fetchActivities();
     }
-    // only re-run when user or viewed userId changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, userId]);
+  }, [user, userId, fetchActivities, prefetched.prefetchedActivities]);
 
   return (
     <div className="min-h-screen p-8 bg-gray-900 text-gray-100">
@@ -161,7 +151,6 @@ export default function Results() {
           ) : (
             <>
               <div className="text-xs text-gray-400 mt-2">Activities: {activities.length}{activitiesError ? ` • Error: ${activitiesError}` : ''}</div>
-              {/* Recent activities compact list removed — using results cards below instead */}
 
               {results.length === 0 ? (
                 <p className="text-gray-400">No results yet.</p>

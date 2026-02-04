@@ -9,12 +9,12 @@ export default function PatientDashboard() {
   const { authFetch, user, logout, notificationsUnread, messagesUnread, refreshProfile } = useAuth();
   const [results, setResults] = useState([]);
   const [heartRate, setHeartRate] = useState(null);
-  const [fallbackHR, setFallbackHR] = useState(null); // last available from prior days
-  const [heartRateSource, setHeartRateSource] = useState(null); // live | summary | cached
+  const [fallbackHR, setFallbackHR] = useState(null);
+  const [heartRateSource, setHeartRateSource] = useState(null);
   const [selectedDateCognitive, setSelectedDateCognitive] = useState(() => new Date().toISOString().slice(0, 10));
-  const [fitbitStatus, setFitbitStatus] = useState('checking'); // checking | connected | not-connected | error
+  const [fitbitStatus, setFitbitStatus] = useState('checking');
 
-  const fetchResults = async () => {
+  const fetchResults = React.useCallback(async () => {
     try {
       const res = await authFetch("http://localhost:5000/api/results");
       const data = await res.json();
@@ -22,31 +22,25 @@ export default function PatientDashboard() {
     } catch (err) {
       console.error(err);
     }
-  };
+  }, [authFetch]);
 
   useEffect(() => {
-    // Ensure we have a fresh user profile (therapist assignment may have changed)
     if (refreshProfile) refreshProfile();
     fetchResults();
-    // Poll heart rate every 20s
     let t;
-    // (therapist name displayed from `user.therapistName` if available)
     const poll = async () => {
       try {
-        // First check connection status
         const statusRes = await authFetch('http://localhost:5000/api/fitbit/me/status');
         const statusData = await statusRes.json();
         if (!statusData.connected) {
           setFitbitStatus('not-connected');
         } else {
           setFitbitStatus('connected');
-          // Then fetch latest heart rate
           const hrRes = await authFetch('http://localhost:5000/api/fitbit/me/heart-rate/latest');
           if (hrRes.status === 404) { setHeartRate(null); setHeartRateSource(null); }
           else {
             const hrData = await hrRes.json();
             if (hrData.success) {
-              // Preserve previous live value when rate-limited/no new data
               if (hrData.bpm != null) {
                 setHeartRate(hrData.bpm);
                 setHeartRateSource(hrData.source || null);
@@ -54,13 +48,11 @@ export default function PatientDashboard() {
                   setFallbackHR({ bpm: hrData.bpm, when: hrData.time || 'today' });
                 }
               } else if (!hrData.rateLimited) {
-                // only clear if not rate limited; otherwise keep last shown value
                 setHeartRate(null);
                 setHeartRateSource(hrData.source || null);
               }
             }
           }
-          // If still null, try last-available once to show something
           if (!heartRate) {
             try {
               const laRes = await authFetch('http://localhost:5000/api/fitbit/me/heart-rate/last-available');
@@ -77,21 +69,15 @@ export default function PatientDashboard() {
     };
     poll();
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  
+  }, [refreshProfile, fetchResults, authFetch, heartRate]);
 
   const displayBpm = heartRate ?? fallbackHR?.bpm ?? '--';
   const isStale = (heartRateSource && heartRateSource.includes('cached')) || (heartRateSource || '').startsWith('summary') || (!heartRate && !!fallbackHR);
-
-  
 
   return (
     <div className="min-h-screen p-8 bg-gray-900 text-gray-100">
       <div className="max-w-6xl mx-auto bg-transparent">
         <div className="grid grid-cols-12 gap-6">
-          {/* Sidebar */}
           <aside className="col-span-3 bg-gray-800 p-4 rounded shadow-inner">
             <div className="mb-6 text-center">
               <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-green-600 to-teal-500 flex items-center justify-center text-xl font-bold">PT</div>
@@ -118,7 +104,6 @@ export default function PatientDashboard() {
             </nav>
           </aside>
 
-          {/* Main content */}
           <main className="col-span-9">
             <div className="text-center mb-4">
               <img
@@ -239,12 +224,6 @@ export default function PatientDashboard() {
                   </div>
                 </div>
               </div>
-
-              {/* Diagnostics panel for Fitbit removed */}
-
-              {/* Demo result generation removed — use actual exercises/games to produce results */}
-
-              {/* Recent results moved to /results page */}
             </div>
           </main>
         </div>

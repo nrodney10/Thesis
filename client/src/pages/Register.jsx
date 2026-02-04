@@ -34,7 +34,6 @@ export default function Register() {
       const data = await res.json();
       if (res.ok && data.success) {
         setSuccess("Registered successfully! Redirecting...");
-        // use centralized auth to store token/user
         login({ token: data.token, user: data.user, remember: true });
         if (data.user?.role === "therapist") navigate("/therapist");
         else navigate("/patient");

@@ -14,7 +14,7 @@ export default function Notifications() {
         const filtered = (j.notifications || []).filter(n => {
           if (n.data?.type === 'therapist-request') {
             if (user?.therapistId && (!n.data?.therapistId || String(n.data?.therapistId) === String(user.therapistId))) {
-              return false; // already linked to a therapist; hide request
+              return false;
             }
             if (n.readAt) return false;
           }
@@ -40,7 +40,6 @@ export default function Notifications() {
     await authFetch(`http://localhost:5000/api/notifications/${id}/read`, { method:'POST' });
     setItems(items.map(n => n._id===id ? { ...n, readAt: new Date().toISOString() } : n));
     decrementNotifications();
-    // optional freshness
     refreshIndicators();
   };
 
@@ -54,12 +53,10 @@ export default function Notifications() {
       });
       const j = await r.json();
       if (j.success) {
-        // mark status for this notification and set it read locally
         const finalStatus = action === 'accept' ? 'accepted' : 'declined';
         setItems((prev)=>prev.filter(n => n._id !== notif._id));
         try { await authFetch(`http://localhost:5000/api/notifications/${notif._id}/read`, { method:'POST' }); } catch (_) {}
         refreshIndicators();
-        // Refresh the logged-in user's profile so therapist assignment appears immediately
         try { if (refreshProfile) await refreshProfile(); } catch (_) {}
         setActionStatus((s)=>({ ...s, [notif._id]: finalStatus }));
       } else {

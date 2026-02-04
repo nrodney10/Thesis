@@ -22,8 +22,7 @@ export default function Templates() {
     },
     metadata: { reps: '', holdSeconds: '', vulnerabilityTags: '' }
   });
-  const [assign, setAssign] = useState({ templateId: '', assignedTo: new Set(), overrides: { title: '', poseConfig: {} } });
-  const [autoAlloc, setAutoAlloc] = useState({ patientId: '', status: '' });
+  
 
   const load = useCallback(async () => {
     setLoading(true);

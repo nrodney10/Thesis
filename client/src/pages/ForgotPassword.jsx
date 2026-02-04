@@ -18,7 +18,7 @@ export default function ForgotPassword() {
       const j = await res.json();
       if (j.success) {
         setStatus('If the email exists, a reset link was sent.');
-        if (j.resetLink) setResetLink(j.resetLink); // shown for local testing
+        if (j.resetLink) setResetLink(j.resetLink);
       } else {
         setStatus(j.message || 'Request failed');
       }

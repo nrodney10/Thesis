@@ -56,7 +56,7 @@ export default function TherapistDashboard() {
   const [patientHeartRate, setPatientHeartRate] = useState(null);
   const [patientHeartRateFallback, setPatientHeartRateFallback] = useState(null);
   const [patientHeartRateSource, setPatientHeartRateSource] = useState(null);
-  const [patientFitbitStatus, setPatientFitbitStatus] = useState('idle'); // idle | checking | connected | not-connected | error
+  const [patientFitbitStatus, setPatientFitbitStatus] = useState('idle');
   const navigate = useNavigate();
   const { push } = useToast();
 
@@ -72,32 +72,25 @@ export default function TherapistDashboard() {
     }
   }, [authFetch]);
 
-  // Mock data used until API endpoints are added
-  useEffect(() => {
-    // load patients from API
-    const load = async () => {
-      try {
-        const res = await authFetch("http://localhost:5000/api/patients");
-        const data = await res.json();
-        if (data.success) {
-          setPatients(data.patients || []);
-          if (data.patients && data.patients.length) {
-            setSelectedPatient(data.patients[0]);
-            fetchPatientResults(data.patients[0]._id);
-          }
-        }
-        // also fetch available patients for assignment
-        fetchAvailablePatients();
-        fetchSchedule();
-      } catch (err) {
-        console.error("Failed to load patients", err);
-      }
-    };
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const fetchPatientResults = useCallback(async (patientId) => {
+    setLoadingResults(true);
+    try {
+      const res = await authFetch(`http://localhost:5000/api/results?userId=${patientId}`);
+      const data = await res.json();
+      if (data.success) setRecentResults(data.results || []);
+    } catch (err) {
+      console.error("Failed to fetch patient results", err);
+    }
+    setLoadingResults(false);
+  }, [authFetch]);
 
-  // Keep "available patients" fresh so newly registered patients appear automatically
+  
+
+  
+
+  
+
+  
   useEffect(() => {
     let cancelled = false;
     let timer;
@@ -114,7 +107,7 @@ export default function TherapistDashboard() {
     };
   }, [fetchAvailablePatients]);
 
-  // Placeholder for fetching real patients via API
+  
   const fetchPatients = async () => {
     try {
       const res = await authFetch("http://localhost:5000/api/patients");
@@ -128,21 +121,7 @@ export default function TherapistDashboard() {
     }
   };
 
-  const fetchPatientResults = useCallback(async (patientId) => {
-    setLoadingResults(true);
-    try {
-      const res = await authFetch(`http://localhost:5000/api/results?userId=${patientId}`);
-      const data = await res.json();
-      if (data.success) setRecentResults(data.results || []);
-    } catch (err) {
-      console.error("Failed to fetch patient results", err);
-    }
-    setLoadingResults(false);
-  }, [authFetch]);
-
   
-
-  // Navigate to Exercises page and preselect patient for assignment
   const assignExercise = (patientId) => {
     if (!patientId) return;
     navigate(`/exercises?patientId=${patientId}`);
@@ -151,7 +130,6 @@ export default function TherapistDashboard() {
   const viewResultsForPatient = async (patientId) => {
     if (!patientId) return;
     try {
-      // Prefetch results and recent activities for the selected patient so Results page can render immediately
       console.debug('viewResultsForPatient: fetching patient results and activities', patientId);
       const [resR, resA] = await Promise.all([
         authFetch(`http://localhost:5000/api/results?userId=${patientId}`),
@@ -167,7 +145,7 @@ export default function TherapistDashboard() {
         console.warn('results fetch not ok', resR.status);
       }
 
-      // Prefer using already-loaded `recentResults` (fetched when selecting patient) to show recent activity immediately
+      
       if (recentResults && recentResults.length) {
         prefetchedActivities = recentResults.map(r => ({
           id: r._id,
@@ -189,7 +167,7 @@ export default function TherapistDashboard() {
       navigate(`/results?userId=${patientId}`, { state: { prefetchedResults, prefetchedActivities } });
     } catch (e) {
       console.error('prefetch view results failed', e);
-      // fallback: navigate without state so Results page will attempt its own fetch
+      
       navigate(`/results?userId=${patientId}`);
     }
   };
@@ -456,7 +434,7 @@ export default function TherapistDashboard() {
     }
   };
 
-  const fetchSchedule = async () => {
+  const fetchSchedule = useCallback(async () => {
     setScheduleLoading(true);
     try {
       const res = await authFetch('http://localhost:5000/api/calendar/therapist');
@@ -485,7 +463,28 @@ export default function TherapistDashboard() {
       setSchedule([]);
     }
     setScheduleLoading(false);
-  };
+  }, [authFetch]);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await authFetch("http://localhost:5000/api/patients");
+        const data = await res.json();
+        if (data.success) {
+          setPatients(data.patients || []);
+          if (data.patients && data.patients.length) {
+            setSelectedPatient(data.patients[0]);
+            fetchPatientResults(data.patients[0]._id);
+          }
+        }
+        fetchAvailablePatients();
+        fetchSchedule();
+      } catch (err) {
+        console.error("Failed to load patients", err);
+      }
+    };
+    load();
+  }, [authFetch, fetchAvailablePatients, fetchPatientResults, fetchSchedule]);
 
   const filteredPatients = useMemo(() => {
     if (!search.trim()) return patients;

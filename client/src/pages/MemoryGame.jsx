@@ -42,8 +42,9 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
   const [startTime, setStartTime] = useState(null);
   const [time, setTime] = useState(0);
   const [autoSubmitted, setAutoSubmitted] = useState(false);
-  const [saveStatus, setSaveStatus] = useState('idle'); // idle | saving | saved | error
+  const [saveStatus, setSaveStatus] = useState('idle');
   const intervalRef = useRef(null);
+  const submitResultRef = useRef(null);
   const [focusedIndex, setFocusedIndex] = useState(0);
 
   useEffect(() => {
@@ -76,14 +77,13 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
   useEffect(() => {
     if (matchedCount === totalPairs && totalPairs > 0) {
       if (intervalRef.current) clearInterval(intervalRef.current);
-      // Only auto-submit for scheduled games; practice runs should wait for manual submit
       if (isScheduled && !autoSubmitted) {
         setAutoSubmitted(true);
-        const t = setTimeout(() => { submitResult({ auto: true }); }, 700);
+        const t = setTimeout(() => { submitResultRef.current?.({ auto: true }); }, 700);
         return () => clearTimeout(t);
       }
     }
-  }, [matchedCount, totalPairs, autoSubmitted, isScheduled, submitResult]);
+  }, [matchedCount, totalPairs, autoSubmitted, isScheduled]);
 
   const handleFlip = useCallback((card) => {
     if (!startTime) setStartTime(Date.now());
@@ -132,20 +132,17 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
     }
   };
 
-  const computeScore = () => {
-    const timePenalty = time;
-    const movePenalty = moves * 2;
-    const base = 100;
-    let score = Math.max(5, Math.round(base - timePenalty - movePenalty));
-    return score;
-  };
+  
 
-  const submitResult = async ({ auto = false, navigateOnSave = false } = {}) => {
+  const submitResult = useCallback(async ({ auto = false, navigateOnSave = false } = {}) => {
     if (saveStatus === 'saved') {
       if (!auto) push('Results already saved for this session.', 'info');
       return true;
     }
-    const score = computeScore();
+    const timePenalty = time;
+    const movePenalty = moves * 2;
+    const base = 100;
+    const score = Math.max(5, Math.round(base - timePenalty - movePenalty));
     const payload = {
       exerciseId: assignmentId || `memory-match-${difficulty}`,
       type: "cognitive",
@@ -178,7 +175,6 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
           setSaveStatus('error');
         }
       } else {
-        // Practice: no auto-submit; just notify locally
         push("Practice round finished. Result not submitted (practice mode).", 'info');
       }
       if (ok) {
@@ -192,7 +188,11 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
       push('Error submitting result', 'error');
       setSaveStatus('error');
     }
-  };
+  }, [saveStatus, isScheduled, assignmentId, authFetch, push, navigate, onFinished, moves, time, difficulty, gameKey]);
+
+  useEffect(() => {
+    submitResultRef.current = submitResult;
+  }, [submitResult]);
 
   return (
     <div className="min-h-screen flex items-start justify-center bg-gray-50 p-8 text-gray-900">
@@ -230,7 +230,7 @@ export default function MemoryGame({ assignmentId, assignmentTitle, gameKey = "m
         <div className="mt-6">
           {allMatched ? (
             <div className="bg-white p-4 rounded border">
-              <div className="text-lg text-gray-900">Finished! Score: {computeScore()}</div>
+              <div className="text-lg text-gray-900">Finished! Score: {Math.max(5, Math.round(100 - time - (moves * 2)))}</div>
               <div className="text-sm text-gray-700 mt-1">
                 {isScheduled
                   ? (saveStatus === 'saving'

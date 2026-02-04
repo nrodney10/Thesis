@@ -9,8 +9,7 @@ export default function ExerciseRunner() {
   const navigate = useNavigate();
   const loc = useLocation();
   const ex = loc.state?.exercise;
-  // `user` not needed in this component
-
+  
   const [running, setRunning] = useState(false);
   const [timeLeft, setTimeLeft] = useState(60);
   const [initialTime, setInitialTime] = useState(60);
@@ -21,7 +20,7 @@ export default function ExerciseRunner() {
   const [recordingBlobUrl, setRecordingBlobUrl] = useState(null);
   const [finished, setFinished] = useState(false);
   const [autoSubmitted, setAutoSubmitted] = useState(false);
-  const [saveStatus, setSaveStatus] = useState('idle'); // idle | saving | saved | error
+  const [saveStatus, setSaveStatus] = useState('idle');
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -30,13 +29,14 @@ export default function ExerciseRunner() {
   const recordedChunksRef = useRef([]);
   const detectorRef = useRef(null);
   const poseLoopRef = useRef(null);
+  const submitResultRef = useRef(null);
   const makePoseMetrics = () => ({
     reps: 0,
     lastAngle: null,
     state: 'down',
     smoothedAngle: null,
     lastRepTime: 0,
-    // progress metrics
+    
     minAngle: Infinity,
     maxAngle: -Infinity,
     sumAngle: 0,
@@ -62,7 +62,7 @@ export default function ExerciseRunner() {
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [heartRate, setHeartRate] = useState(null);
   const [fallbackHR, setFallbackHR] = useState(null);
-  const [fitbitStatus, setFitbitStatus] = useState('unknown'); // unknown | connected | not-connected | error
+  const [fitbitStatus, setFitbitStatus] = useState('unknown');
   const [nowMs, setNowMs] = useState(() => Date.now());
   const lastSpeakRef = useRef({ t: 0, text: '' });
 
@@ -115,7 +115,6 @@ export default function ExerciseRunner() {
     } catch (_) {}
   }, [voiceEnabled]);
 
-  // Stable stopPoseDetector and stopMedia handlers (place before effects to avoid TDZ on first render)
   const stopPoseDetector = useCallback(async () => {
     try {
       if (poseLoopRef.current) cancelAnimationFrame(poseLoopRef.current);
@@ -129,7 +128,6 @@ export default function ExerciseRunner() {
     try { if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop(); } catch (e) {}
     try { if (mediaStreamRef.current) { mediaStreamRef.current.getTracks().forEach((t) => t.stop()); mediaStreamRef.current = null; } } catch (e) {}
     if (videoRef.current) videoRef.current.srcObject = null;
-    // stop pose detector if running
     stopPoseDetector();
   }, [stopPoseDetector]);
 
@@ -144,19 +142,15 @@ export default function ExerciseRunner() {
       push('Session complete. Save results or restart.', 'info');
       if (!autoSubmitted) {
         setAutoSubmitted(true);
-        submitResult({ completed: true, navigateOnSave: false, auto: true });
+        submitResultRef.current?.({ completed: true, navigateOnSave: false, auto: true });
       }
     }
     return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, timeLeft, stopMedia, push, autoSubmitted]);
+  }, [running, timeLeft, stopMedia, push, autoSubmitted, submitResult]);
 
-  // Stop media on unmount
   useEffect(() => {
     return () => { stopMedia(); };
   }, [stopMedia]);
-
-  // Poll Fitbit latest heart rate if connected
   useEffect(() => {
     let timer;
     const poll = async () => {
@@ -185,17 +179,14 @@ export default function ExerciseRunner() {
     };
     poll();
     return () => clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    
+  }, [authFetch, heartRate]);
 
-  // Revoke any recording blob URL when it changes or on unmount
   useEffect(() => {
     return () => {
       if (recordingBlobUrl) URL.revokeObjectURL(recordingBlobUrl);
     };
   }, [recordingBlobUrl]);
-
-  // Keep overlay canvas sized to the video display
   useEffect(() => {
     const v = videoRef.current;
     const c = canvasRef.current;
@@ -244,25 +235,24 @@ export default function ExerciseRunner() {
       const attempted = [];
       let chosen = null;
 
-      // Try WebGL first
       try {
         attempted.push('webgl');
-        try { await import('@tensorflow/tfjs-backend-webgl'); } catch (_) { /* ignore */ }
+        try { await import('@tensorflow/tfjs-backend-webgl'); } catch (_) { }
         await tf.setBackend('webgl');
         await tf.ready();
         chosen = 'webgl';
       } catch (eWeb) {
         console.warn('webgl failed', eWeb);
-        // Try WASM next
+        
         try {
           attempted.push('wasm');
-          try { await import('@tensorflow/tfjs-backend-wasm'); } catch (_) { /* ignore */ }
+          try { await import('@tensorflow/tfjs-backend-wasm'); } catch (_) { }
           await tf.setBackend('wasm');
           await tf.ready();
           chosen = 'wasm';
         } catch (eWasm) {
           console.warn('wasm failed', eWasm);
-          // Fallback to CPU
+         
           try {
             attempted.push('cpu');
             await tf.setBackend('cpu');
@@ -306,7 +296,7 @@ export default function ExerciseRunner() {
 
   function getPoseConfig() {
     const baseCfg = ex.poseConfig || {};
-    // If a template explicitly targets a T-pose or other named target, prefer the appropriate joint chain
+    
     let guessedJoints = baseCfg.joints || (/(arm|elbow)/i.test(ex.title || '') ? 'arm' : 'knee');
     if (baseCfg.targets?.type === 'tpose') guessedJoints = 'arm';
     if (baseCfg.targets?.type === 'squat') guessedJoints = 'knee';
@@ -325,7 +315,7 @@ export default function ExerciseRunner() {
     const targetType = cfg.targets?.type;
     const isStaticHold = targetType === 'tpose';
     
-    // Select keypoints based on joint config; choose the better-visible side
+    
     const key = pose.keypoints || [];
     const byName = (name) => key.find(k => k.name === name || k.part === name);
 
@@ -339,13 +329,13 @@ export default function ExerciseRunner() {
     };
 
     if (cfg.joints === 'knee') {
-      // choose side by knee visibility
+      
       [a, b, c] = pickSide(['left_hip','left_knee','left_ankle'], ['right_hip','right_knee','right_ankle']);
     } else if (cfg.joints === 'arm') {
-      // choose side by elbow visibility
+      
       [a, b, c] = pickSide(['left_shoulder','left_elbow','left_wrist'], ['right_shoulder','right_elbow','right_wrist']);
     } else {
-      // shoulder/knee chain, pick better side by hip/knee visibility
+      
       [a, b, c] = pickSide(['left_shoulder','left_hip','left_knee'], ['right_shoulder','right_hip','right_knee']);
     }
 
@@ -353,26 +343,26 @@ export default function ExerciseRunner() {
     
     let angle = calcAngle(a, b, c);
     if (angle == null) return;
-    // For elbow coaching, use elbow flexion degrees (0=straight, higher=bent)
+    
     if (cfg.joints === 'arm') angle = 180 - angle;
 
     const metrics = poseMetricsRef.current;
     
-    // EMA smoothing
+    
     const alpha = typeof cfg.smoothing === 'number' ? cfg.smoothing : 0.2;
     const prev = metrics.smoothedAngle ?? angle;
     const smoothed = alpha * angle + (1 - alpha) * prev;
     metrics.smoothedAngle = smoothed;
     metrics.lastAngle = smoothed;
-    // record side if not set
+    
     if (!metrics.usedSide) metrics.usedSide = chosenSide;
-    // update min/max/avg
+    
     metrics.minAngle = Math.min(metrics.minAngle, smoothed);
     metrics.maxAngle = Math.max(metrics.maxAngle, smoothed);
     metrics.sumAngle += smoothed;
     metrics.sampleCount += 1;
 
-    // State machine with debouncing (skip for static holds like T-pose or squat hold)
+    
     if (!isStaticHold) {
       const upThreshold = cfg.upAngle ?? 90;
       const downThreshold = cfg.downAngle ?? 140;
@@ -386,12 +376,12 @@ export default function ExerciseRunner() {
           const score = fb.inRange ? 1 : 0.2;
           metrics.pendingRepScore = score;
         }
-        // encourage user to lift further if near threshold
+        
         if (smoothed < upThreshold - 10) speak(cfg.joints === 'arm' ? 'Raise your arm higher.' : 'Go lower.');
       } else if (metrics.state === 'up' && smoothed > downThreshold) {
-        // Check debounce before counting rep
+        
         if ((now - metrics.lastRepTime) > minRepTime) {
-          // record quality for this rep
+          
           let score;
           if (targetType === 'squat' && typeof metrics.pendingRepScore === 'number') {
             score = metrics.pendingRepScore;
@@ -414,7 +404,7 @@ export default function ExerciseRunner() {
       metrics.state = 'hold';
     }
 
-    // Continuous feedback each frame + time-in-target accumulation
+    
     const cont = evaluateForm(smoothed, cfg, key, { chosenSide, rawAngle: angle });
     const now2 = Date.now();
     const lastT = metrics.lastSampleTime ?? now2;
@@ -437,13 +427,13 @@ export default function ExerciseRunner() {
     }
     if (isInRange) metrics.timeInTargetMs += dt;
     metrics.lastSampleTime = now2;
-    // Speak only when level changes to avoid repeated chatter. Praise on entry to 'good'.
+    
     const prevLevel = metrics.prevLevel || null;
     if (cont.level !== prevLevel) {
       if (cont.level === 'good') {
         speak(cont.message, { minGapMs: 1200 });
       } else {
-        // caution/bad -> immediate correction
+        
         speak(cont.message);
       }
       metrics.prevLevel = cont.level;
@@ -452,7 +442,7 @@ export default function ExerciseRunner() {
   }
 
   function calcAngle(a, b, c) {
-    // angle at point b formed by a-b-c
+    
     const ab = { x: a.x - b.x, y: a.y - b.y };
     const cb = { x: c.x - b.x, y: c.y - b.y };
     const dot = ab.x * cb.x + ab.y * cb.y;
@@ -486,7 +476,7 @@ export default function ExerciseRunner() {
       const leftTiltOk = leftTilt <= allowedTilt;
       const rightTiltOk = rightTilt <= allowedTilt;
 
-      // Prefer explicit elbow check when available: measure elbow flexion (0 deg = straight)
+        
       const le = by('left_elbow');
       const re = by('right_elbow');
       const elbowTol = typeof cfg.targets?.elbowTol === 'number' ? cfg.targets.elbowTol : 12;
@@ -510,7 +500,7 @@ export default function ExerciseRunner() {
         if (!rightElbowOk) return { level: 'caution', message: base || `Right elbow: ${rightElbowFlexion != null ? Math.round(rightElbowFlexion) + ' deg flex' : 'unseen'} - straighten toward 0 deg.`, inRange: false, details: { leftTilt, rightTilt, rightElbowFlexion } };
       }
 
-      // Fallback to tilt-only guidance when elbows are not visible or confident
+      
       const leftDy = lw.y - ls.y;
       const rightDy = rw.y - rs.y;
       const base = cfg.targets?.incorrectMsg;
@@ -634,7 +624,7 @@ export default function ExerciseRunner() {
     const scoreMin = 0.3;
     const get = (name) => kp.find(k => (k.name === name || k.part === name));
     const angle = poseMetricsRef.current.smoothedAngle;
-    // Derive fresh feedback for drawing to avoid state lag
+    
     const cfg = getPoseConfig();
     const fb = evaluateForm(angle, cfg, pose.keypoints || [], { chosenSide: poseMetricsRef.current.usedSide });
     const levelColor = fb.level === 'good' ? '#22c55e' : fb.level === 'caution' ? '#f59e0b' : fb.level === 'bad' ? '#ef4444' : '#38bdf8';
@@ -668,7 +658,7 @@ export default function ExerciseRunner() {
     const incorrect = m.incorrectReps || 0;
     ctx.fillText(`Angle: ${angle != null ? angle.toFixed(0) + ' deg' : '--'} | In-range: ${inRangeSec.toFixed(1)}s | Out-of-range: ${outCount} | Correct/Wrong: ${correct}/${incorrect} | Min/Max: ${minA}/${maxA}`, 8, 19);
 
-    // Secondary line with target info
+    
     ctx.font = 'bold 12px ui-sans-serif, system-ui, -apple-system';
     ctx.fillStyle = '#0f172a';
     let infoLine = fb.message || '';
@@ -681,7 +671,7 @@ export default function ExerciseRunner() {
     } else if (fb.details?.kneeAngle != null) {
       infoLine = `Squat: knee ${fb.details.kneeAngle.toFixed(0)} deg, torso lean ${fb.details.torsoLeanDeg?.toFixed(0) ?? '--'} deg, arms tilt ${fb.details.armTilt != null ? fb.details.armTilt.toFixed(0) : '--'} deg`;
     } else if (cfg.targets?.type === 'tpose') {
-      // Show configured T-pose targets (elbow flexion tolerance and allowed tilt)
+      
       const allowedTilt = typeof cfg.targets.allowedRotation === 'number' ? cfg.targets.allowedRotation : 12;
       const elbowTol = typeof cfg.targets.elbowTol === 'number' ? cfg.targets.elbowTol : 12;
       infoLine = `T-pose target: flex <= ${elbowTol} deg; tilt <= ${allowedTilt} deg`;
@@ -748,7 +738,7 @@ export default function ExerciseRunner() {
     push('Exercise restarted', 'info');
   };
 
-  const submitResult = async ({ completed = true, score = null, navigateOnSave = true, auto = false } = {}) => {
+  const submitResult = useCallback(async ({ completed = true, score = null, navigateOnSave = true, auto = false } = {}) => {
     if (!ex) return push('No exercise selected', 'error');
     if (saveStatus === 'saved') {
       if (!auto) push('Results already saved for this session.', 'info');
@@ -758,7 +748,7 @@ export default function ExerciseRunner() {
     try {
       setSaveStatus('saving');
       const poseMetricsRaw = poseMetricsRef.current || { reps: 0 };
-      // finalize averages and cadence
+      
       const avgAngle = poseMetricsRaw.sampleCount > 0 ? (poseMetricsRaw.sumAngle / poseMetricsRaw.sampleCount) : null;
       const durationSec = Math.max(1, initialTime - timeLeft);
       const cadence = reps / (durationSec / 60);
@@ -815,7 +805,11 @@ export default function ExerciseRunner() {
       setSaveStatus('error');
     }
     return saved;
-  };
+  }, [authFetch, ex, saveStatus, initialTime, timeLeft, reps, difficulty, recordingBlobUrl, repStats, push, navigate, heartRate, markComplete]);
+
+  useEffect(() => {
+    submitResultRef.current = submitResult;
+  }, [submitResult]);
 
   if (!ex) return <main className="min-h-screen p-8 bg-gray-900 text-gray-100"><div className="max-w-2xl mx-auto">No exercise selected</div></main>;
 
@@ -889,7 +883,7 @@ export default function ExerciseRunner() {
                 <div className="text-xs text-gray-200 mt-1">Attempted: {poseDiag.attempted?.join(', ') || 'none'}. Backend: {poseDiag.backend || 'unknown'}</div>
                 <div className="mt-2 flex gap-2">
                   <button onClick={async ()=>{
-                    // force CPU backend and retry
+                    
                     try {
                       const tf = await import('@tensorflow/tfjs');
                       await tf.setBackend('cpu');
@@ -932,7 +926,6 @@ export default function ExerciseRunner() {
                   </span>
                 ) : fitbitStatus === 'not-connected' ? (
                   <button onClick={()=> {
-                    // open connect route with token query param for auth
                     const t = localStorage.getItem('token') || sessionStorage.getItem('token');
                     const url = `http://localhost:5000/api/fitbit/connect?token=${encodeURIComponent(t||'')}`;
                     window.open(url, '_blank');

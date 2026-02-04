@@ -149,7 +149,7 @@ export default function TherapistCalendar() {
                     if (!selectedPatient) return alert('Select a patient first');
                     if (!scheduleForm.templateId) return alert('Pick a template');
                     if (!scheduleForm.dueAt) return alert('Pick a due date for the schedule');
-                    // validate due date not in past
+                    
                     if (scheduleForm.dueAt) {
                       const d = new Date(scheduleForm.dueAt);
                       const today = new Date(); today.setHours(0,0,0,0);
@@ -289,10 +289,9 @@ export default function TherapistCalendar() {
                   <button onClick={async ()=>{
                     // open inline edit prompt
                     const newTitle = window.prompt('Title', it.title);
-                    if (newTitle === null) return; // cancelled
+                    if (newTitle === null) return;
                     const newDue = window.prompt('Due date (YYYY-MM-DD) or empty to clear', it.dueAt ? new Date(it.dueAt).toISOString().slice(0,10) : '');
                     if (newDue !== null) {
-                      // validate not in past
                       if (newDue) {
                         const d = new Date(newDue);
                         const today = new Date(); today.setHours(0,0,0,0);

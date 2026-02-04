@@ -24,7 +24,6 @@ export default function GamePlayer() {
         const uid = user?.id || user?._id;
         let match = list.find((ex) => String(ex._id) === String(id) && uid && (ex.assignedTo || []).map(String).includes(String(uid)));
         if (!match) {
-          // fall back to scheduled calendar items so we can show the countdown instead of an error
           try {
             const calRes = await authFetch('http://localhost:5000/api/calendar/patient');
             const cal = await calRes.json();
@@ -32,7 +31,7 @@ export default function GamePlayer() {
               const fromCal = (cal.items || []).find(it => String(it.id || it._id) === String(id) && (it.metadata?.assignmentType || it.type || '').toLowerCase() === 'game');
               if (fromCal) match = { ...fromCal, _id: fromCal._id || fromCal.id };
             }
-          } catch (_) { /* ignore */ }
+          } catch (_) {}
         }
         if (!match) {
           setError('Game not found or not assigned to you.');
@@ -46,7 +45,7 @@ export default function GamePlayer() {
       setLoading(false);
     };
     load();
-  }, [authFetch, id, user?.id]);
+  }, [authFetch, id, user?.id, user?._id]);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">Loading game...</div>;
   if (error) return (

@@ -22,10 +22,9 @@ export default function Exercises() {
   const [selectedExerciseIds, setSelectedExerciseIds] = useState(new Set());
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  const fetchExercises = async () => {
+  const fetchExercises = useCallback(async () => {
     setLoading(true);
     try {
-      // server endpoint may be implemented later; this is optimistic
       const res = await authFetch('http://localhost:5000/api/exercises');
       const data = await res.json();
       if (data.success) setExercises(data.exercises || []);
@@ -35,9 +34,9 @@ export default function Exercises() {
       push('Failed to load exercises', 'error');
     }
     setLoading(false);
-  };
+  }, [authFetch, push]);
 
-  const fetchPatients = async () => {
+  const fetchPatients = useCallback(async () => {
     setPatientsLoading(true);
     try {
       const res = await authFetch('http://localhost:5000/api/patients');
@@ -48,9 +47,9 @@ export default function Exercises() {
       push('Failed to load patients', 'error');
     }
     setPatientsLoading(false);
-  };
+  }, [authFetch, push]);
 
-  const fetchTemplates = async () => {
+  const fetchTemplates = useCallback(async () => {
     setTemplatesLoading(true);
     try {
       const res = await authFetch('http://localhost:5000/api/templates');
@@ -61,7 +60,7 @@ export default function Exercises() {
       push('Failed to load templates', 'error');
     }
     setTemplatesLoading(false);
-  };
+  }, [authFetch, push]);
 
 
   const navigate = useNavigate();
@@ -69,17 +68,14 @@ export default function Exercises() {
 
   useEffect(() => {
     fetchExercises();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.key]);
+  }, [location.key, fetchExercises]);
 
-  // honor optional ?patientId= in URL to preselect a patient when navigating from dashboard
   useEffect(() => {
     try {
       const qp = new URLSearchParams(location.search);
       const pid = qp.get('patientId');
       if (pid) setSelectedPatientId(pid);
-    } catch (e) { /* ignore */ }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    } catch (e) { }
   }, [location.search]);
 
   useEffect(() => {
@@ -87,8 +83,7 @@ export default function Exercises() {
       fetchPatients();
       fetchTemplates();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.role]);
+  }, [user?.role, fetchPatients, fetchTemplates]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -128,7 +123,6 @@ export default function Exercises() {
     try {
       const cleanedOverrides = { ...assign.overrides };
       if (cleanedOverrides.poseConfig) cleanedOverrides.poseConfig = sanitizePoseConfig(cleanedOverrides.poseConfig);
-      // convert vulnerability tags string -> array if needed
       if (cleanedOverrides.metadata && typeof cleanedOverrides.metadata.vulnerabilityTags === 'string') {
         cleanedOverrides.metadata.vulnerabilityTags = cleanedOverrides.metadata.vulnerabilityTags.split(',').map(s=>s.trim()).filter(Boolean);
       }
@@ -152,7 +146,6 @@ export default function Exercises() {
     if (!autoAlloc.patientId) return push('Pick a patient to auto-allocate', 'error');
     setAutoAlloc((s)=>({ ...s, status:'Running...' }));
     try {
-      // If the therapist supplies vulnerability tags, use the generic endpoint which accepts tags
       const hasTags = autoAlloc.vulnerabilities && String(autoAlloc.vulnerabilities).trim().length > 0;
       let res;
       if (hasTags) {
@@ -254,7 +247,6 @@ export default function Exercises() {
 
   useEffect(() => {
     resetSelection();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPatientId]);
 
   const handleDelete = async () => {
@@ -369,7 +361,6 @@ export default function Exercises() {
     return names.join(', ');
   };
 
-  // Schedule helpers for therapist viewing/adding activities per patient
   const [showAddActivity, setShowAddActivity] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({ mode: 'template', templateId: '', title: '', description: '', dueAt: '', dailyReminder: false, assignmentType: 'exercise' });
 
@@ -447,7 +438,7 @@ export default function Exercises() {
     navigate('/exercises/run', { state: { exercise: ex } });
   };
 
-  // Therapist view: assign and manage exercises/games
+  
   if (user?.role === 'therapist') {
     return (
       <main role="main" className="min-h-screen p-8 bg-gray-900 text-gray-100">
@@ -697,7 +688,7 @@ export default function Exercises() {
     );
   }
 
-  // Patient view: practice plus scheduled assignments
+  
   return (
     <main role="main" className="min-h-screen p-8 bg-gray-900 text-gray-100">
       <div className="max-w-5xl mx-auto">
