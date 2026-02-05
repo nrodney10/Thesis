@@ -146,7 +146,7 @@ export default function ExerciseRunner() {
       }
     }
     return () => clearInterval(t);
-  }, [running, timeLeft, stopMedia, push, autoSubmitted, submitResult]);
+  }, [running, timeLeft, stopMedia, push, autoSubmitted]);
 
   useEffect(() => {
     return () => { stopMedia(); };

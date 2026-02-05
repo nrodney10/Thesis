@@ -82,7 +82,7 @@ export default function Results() {
       console.error('fetchActivities error', e);
       setActivitiesError(String(e));
     }
-  }, [authFetch, user]);
+  }, [authFetch, user, userId]);
 
   useEffect(() => {
     if (prefetched.prefetchedResults) {

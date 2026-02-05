@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
@@ -20,36 +20,19 @@ export default function StroopGame({ assignmentId, assignmentTitle, gameKey = 's
   const [saveStatus, setSaveStatus] = useState('idle'); // idle | saving | saved | error
   const [finalStats, setFinalStats] = useState(null);
   const [pendingPayload, setPendingPayload] = useState(null);
-  const finishRef = React.useRef(null);
-
-  const markComplete = async () => {
+  const markComplete = useCallback(async () => {
     if (!isScheduled || !assignmentId) return;
     try { await authFetch(`http://localhost:5000/api/exercises/${assignmentId}/complete`, { method: 'POST' }); } catch (_) {}
-  };
+  }, [authFetch, assignmentId, isScheduled]);
 
-  const next = React.useCallback(() => {
+  const next = useCallback(() => {
     const word = COLORS[Math.floor(Math.random() * COLORS.length)];
     const color = COLORS[Math.floor(Math.random() * COLORS.length)];
     setCurrent({ word, color });
     setStartTime(Date.now());
   }, []);
 
-  const handleAnswer = React.useCallback((choice) => {
-    if (finished) return;
-    const rt = Date.now() - startTime;
-    const correct = choice === current.color;
-    setScore((s) => s + (correct ? 1 : 0));
-    setTimes((t) => [...t, rt]);
-    setTrial((tr) => tr + 1);
-    if (trial >= 14) finishRef.current?.([...times, rt]);
-    else next();
-  }, [finished, startTime, current.color, trial, times, next]);
-
-  useEffect(() => {
-    next();
-  }, [next]);
-
-  const submitPayload = async (payload) => {
+  const submitPayload = useCallback(async (payload) => {
     try {
       if (isScheduled) {
         setSaveStatus('saving');
@@ -65,9 +48,9 @@ export default function StroopGame({ assignmentId, assignmentTitle, gameKey = 's
       push('Error submitting Stroop result', 'error');
       setSaveStatus('error');
     }
-  };
+  }, [authFetch, isScheduled, markComplete, push]);
 
-  const finish = async (allTimes) => {
+  const finish = useCallback(async (allTimes) => {
     const avg = Math.round(allTimes.reduce((a, b) => a + b, 0) / allTimes.length);
     const finalScore = score;
     setFinished(true);
@@ -75,11 +58,22 @@ export default function StroopGame({ assignmentId, assignmentTitle, gameKey = 's
     const payload = { exerciseId: assignmentId || 'stroop', type: 'cognitive', score: finalScore, metadata: { avgRTms: avg, trials: allTimes.length, gameKey } };
     setPendingPayload(payload);
     await submitPayload(payload);
-  };
+  }, [assignmentId, gameKey, score, submitPayload]);
+
+  const handleAnswer = useCallback((choice) => {
+    if (finished) return;
+    const rt = Date.now() - startTime;
+    const correct = choice === current.color;
+    setScore((s) => s + (correct ? 1 : 0));
+    setTimes((t) => [...t, rt]);
+    setTrial((tr) => tr + 1);
+    if (trial >= 14) finish([...times, rt]);
+    else next();
+  }, [finished, startTime, current.color, trial, times, next, finish]);
 
   useEffect(() => {
-    finishRef.current = finish;
-  }, [finish]);
+    next();
+  }, [next]);
 
   const restart = () => {
     setScore(0);

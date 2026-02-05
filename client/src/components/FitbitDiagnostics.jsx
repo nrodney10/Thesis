@@ -84,7 +84,6 @@ export default function FitbitDiagnostics() {
   };
 
   const openReconnect = () => {
-    // open reset-and-connect in new window using auth token from storage handled by authFetch
     const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
     const url = `http://localhost:5000/api/fitbit/reset-and-connect?token=${encodeURIComponent(token)}`;
     window.open(url, '_blank');

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
 
-// Advanced interactive time-series chart with hover tooltip and date/time axis
+
 export default function TrendChart({
   data = [],
   types = [],
@@ -25,7 +25,7 @@ export default function TrendChart({
     return sorted.map((r) => {
       const d = new Date(r.createdAt);
       const v = typeof r.score === 'number' ? r.score : (typeof r.value === 'number' ? r.value : Number(r.score) || 0);
-      // Provide a date-only label for axis ticks; keep full datetime available in raw
+    
       return {
         x: d.getTime(),
         y: v,
@@ -45,7 +45,7 @@ export default function TrendChart({
     const pad = Math.max(1, (max - min) * 0.08);
     min = Math.max(0, min - pad);
     max = max + pad;
-    // force ticks every 10 units for clearer, consistent Y axis
+    
     const step = 10;
     const minTick = Math.floor(min / step) * step;
     const maxTick = Math.ceil(max / step) * step;
@@ -61,19 +61,19 @@ export default function TrendChart({
   const padT = 22;
   const padB = 44;
 
-  // compute X positions by index to ensure even spacing and avoid timestamp clustering
+  
   const xPositions = useMemo(() => points.map((p, i) => {
     if (points.length === 1) return padL + (vw - padL - padR) / 2;
     return padL + (i / Math.max(1, points.length - 1)) * (vw - padL - padR);
   }), [points, vw, padL, padR]);
 
   const scaleX = React.useCallback((vOrIndex) => {
-    // if passed a timestamp, fall back to index-based mapping by finding index
+    
     if (typeof vOrIndex === 'number' && points.length && points.some(p => p.x === vOrIndex)) {
       const idx = points.findIndex(p => p.x === vOrIndex);
       return xPositions[idx] ?? (padL + (vw - padL - padR) / 2);
     }
-    // if passed an index
+    
     if (typeof vOrIndex === 'number') return xPositions[vOrIndex] ?? (padL + (vw - padL - padR) / 2);
     return padL + (vw - padL - padR) / 2;
   }, [points, xPositions, vw, padL, padR]);
@@ -88,7 +88,7 @@ export default function TrendChart({
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    // Precompute client-space positions for each point to compare directly with mouse
+    
     const clientPositions = points.map((p, i) => {
       const svgX = xPositions[i];
       const svgY = scaleY(p.y);
@@ -97,7 +97,7 @@ export default function TrendChart({
       return { svgX, svgY, clientX, clientY };
     });
 
-    // find nearest point in client pixels using Euclidean distance
+    
     let best = 0; let bestD = Infinity;
     clientPositions.forEach((pos, i) => {
       const dx = pos.clientX - mouseX;
