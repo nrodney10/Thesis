@@ -67,7 +67,7 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ message: "Invalid email or password" });
     }
 
-    // ✅ SUCCESS — issue JWT and return user + token
+    //SUCCESS — issue JWT and return user + token
     const token = jwt.sign(
       { id: user._id, name: user.name, role: user.role },
       process.env.JWT_SECRET,
@@ -101,7 +101,6 @@ router.post("/forgot", async (req, res) => {
     await user.save();
 
     const resetLink = `http://localhost:3000/reset?token=${rawToken}&email=${encodeURIComponent(email)}`;
-    // Attempt to send email if SMTP is configured
     try { await notifyUsers([user._id], "Password reset", `Reset link: ${resetLink}`); } catch (e) { console.warn("notify send failed", e.message); }
 
     res.json({ success: true, message: "If the email exists, a reset link was sent.", resetLink }); // resetLink returned for local testing
@@ -111,7 +110,6 @@ router.post("/forgot", async (req, res) => {
   }
 });
 
-// RESET PASSWORD
 router.post("/reset", async (req, res) => {
   try {
     const { token, email, newPassword } = req.body;

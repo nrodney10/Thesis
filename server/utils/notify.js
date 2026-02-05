@@ -2,7 +2,6 @@ export async function notifyUsers(userIds, subject, message) {
   console.log('notifyUsers called for', userIds, subject);
   if (!process.env.SMTP_HOST) return Promise.resolve();
 
-  // dynamic import to avoid runtime errors when nodemailer isn't installed
   try {
     const nodemailer = await import('nodemailer');
     const transporter = nodemailer.createTransport({
