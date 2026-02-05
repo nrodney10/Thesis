@@ -160,7 +160,13 @@ async function ensureAccessToken(userId){
   const r = await fetch(FITBIT_TOKEN_URL, { method:'POST', headers:{ 'Authorization':`Basic ${b64(`${FITBIT_CLIENT_ID}:${FITBIT_CLIENT_SECRET}`)}`, 'Content-Type':'application/x-www-form-urlencoded' }, body: body.toString() });
   const data = await r.json(); if (!r.ok) throw new Error('Failed to refresh Fitbit token');
   const newExpires = new Date(Date.now() + (data.expires_in || 3600) * 1000);
-  await User.findByIdAndUpdate(userId, { $set: { fitbit: { accessToken: data.access_token, refreshToken: data.refresh_token || user.fitbit.refreshToken, scope: data.scope || user.fitbit.scope, expiresAt: newExpires, fitbitUserId: user.fitbit.fitbitUserId } } });
+  await User.findByIdAndUpdate(userId, { $set: {
+    'fitbit.accessToken': data.access_token,
+    'fitbit.refreshToken': data.refresh_token || user.fitbit.refreshToken,
+    'fitbit.scope': data.scope || user.fitbit.scope,
+    'fitbit.expiresAt': newExpires,
+    'fitbit.fitbitUserId': user.fitbit.fitbitUserId
+  }});
   return data.access_token;
 }
 
@@ -453,6 +459,7 @@ router.post('/me/disconnect', verifyToken, async (req, res) => {
       'fitbit.expiresAt': 1,
       'fitbit.scope': 1,
       'fitbit.fitbitUserId': 1,
+      'fitbit.lastHeartRate': 1,
       'fitbit.pkceVerifier': 1,
       'fitbit.pkceCreatedAt': 1
     }});
@@ -473,6 +480,7 @@ router.get('/reset-and-connect', verifyToken, async (req, res) => {
       'fitbit.expiresAt': 1,
       'fitbit.scope': 1,
       'fitbit.fitbitUserId': 1,
+      'fitbit.lastHeartRate': 1,
       'fitbit.pkceVerifier': 1,
       'fitbit.pkceCreatedAt': 1
     }});

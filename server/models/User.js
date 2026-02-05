@@ -20,6 +20,12 @@ const userSchema = new mongoose.Schema({
     expiresAt: { type: Date },
     scope: { type: String },
     fitbitUserId: { type: String },
+    lastHeartRate: {
+      bpm: { type: Number },
+      time: { type: String },
+      recordedAt: { type: Date },
+      source: { type: String }
+    },
     // PKCE support (persist across restarts)
     pkceVerifier: { type: String },
     pkceCreatedAt: { type: Date }
