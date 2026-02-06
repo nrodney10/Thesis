@@ -202,6 +202,7 @@ export default function Exercises() {
 
   const visiblePatientExercises = useMemo(() => {
     return filteredExercises.filter((ex) => {
+      if (!ex?.dueAt) return true;
       const status = completionStatus(ex);
       if (!status) return true;
       return status.completedAt >= startOfToday;
@@ -410,8 +411,10 @@ export default function Exercises() {
   const canStartExercise = (ex) => {
     const dueMs = ex?.dueAt ? new Date(ex.dueAt).getTime() : NaN;
     if (Number.isFinite(dueMs) && dueMs > now.getTime()) return false;
-    const completed = completionStatus(ex);
-    if (completed?.completedToday) return false;
+    if (ex?.dueAt) {
+      const completed = completionStatus(ex);
+      if (completed?.completedToday) return false;
+    }
     return true;
   };
 
@@ -706,22 +709,23 @@ export default function Exercises() {
               <ul className="space-y-3">
                 {patientReadyExercises.map((ex) => {
                   const dueAt = ex.dueAt ? new Date(ex.dueAt) : null;
-                  const completed = completionStatus(ex);
+                  const isPractice = !ex?.dueAt;
+                  const completed = isPractice ? null : completionStatus(ex);
                   return (
                     <li key={ex._id} className="p-3 bg-gray-900 rounded flex items-center justify-between">
                       <div>
                         <div className="font-medium text-white">{ex.title}</div>
                         <div className="text-xs text-gray-400">{ex.description}</div>
                         {dueAt && <div className="text-[11px] text-gray-500 mt-1">Scheduled for {dueAt.toLocaleDateString()} (now available)</div>}
-                        {completed?.completedToday && <div className="text-[11px] text-green-300 mt-1">Performed today</div>}
+                        {!isPractice && completed?.completedToday && <div className="text-[11px] text-green-300 mt-1">Performed today</div>}
                       </div>
                       <div className="text-sm">
                         <button
                           onClick={() => startExercise(ex)}
-                          disabled={!!completed?.completedToday}
-                          className={`px-3 py-1 rounded text-white ${completed?.completedToday ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-indigo-600'}`}
+                          disabled={!isPractice && !!completed?.completedToday}
+                          className={`px-3 py-1 rounded text-white ${!isPractice && completed?.completedToday ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-indigo-600'}`}
                         >
-                          {completed?.completedToday ? 'Completed' : 'Start'}
+                          {!isPractice && completed?.completedToday ? 'Completed' : 'Start'}
                         </button>
                       </div>
                     </li>

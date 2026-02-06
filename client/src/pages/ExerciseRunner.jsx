@@ -9,6 +9,7 @@ export default function ExerciseRunner() {
   const navigate = useNavigate();
   const loc = useLocation();
   const ex = loc.state?.exercise;
+  const isScheduled = Boolean(ex?.dueAt);
   
   const [running, setRunning] = useState(false);
   const [timeLeft, setTimeLeft] = useState(60);
@@ -86,7 +87,7 @@ export default function ExerciseRunner() {
 
   const markComplete = useCallback(async () => {
     try {
-      if (!ex || !ex._id) return false;
+      if (!isScheduled || !ex || !ex._id) return false;
       const res = await authFetch(`http://localhost:5000/api/exercises/${ex._id}/complete`, { method:'POST' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
@@ -99,7 +100,7 @@ export default function ExerciseRunner() {
       push('Failed to mark exercise complete', 'error');
       return false;
     }
-  }, [authFetch, ex, push]);
+  }, [authFetch, ex, push, isScheduled]);
 
   const speak = useCallback((text, opts = {}) => {
     try {
@@ -138,15 +139,15 @@ export default function ExerciseRunner() {
       setRunning(false);
       stopMedia();
       setFinished(true);
-      setFeedback({ level: 'info', message: 'Session complete. Save results or restart.' });
-      push('Session complete. Save results or restart.', 'info');
-      if (!autoSubmitted) {
+      setFeedback({ level: 'info', message: isScheduled ? 'Session complete. Save results or restart.' : 'Session complete (practice mode).' });
+      push(isScheduled ? 'Session complete. Save results or restart.' : 'Session complete (practice mode).', 'info');
+      if (isScheduled && !autoSubmitted) {
         setAutoSubmitted(true);
         submitResultRef.current?.({ completed: true, navigateOnSave: false, auto: true });
       }
     }
     return () => clearInterval(t);
-  }, [running, timeLeft, stopMedia, push, autoSubmitted]);
+  }, [running, timeLeft, stopMedia, push, autoSubmitted, isScheduled]);
 
   useEffect(() => {
     return () => { stopMedia(); };
@@ -740,6 +741,10 @@ export default function ExerciseRunner() {
 
   const submitResult = useCallback(async ({ completed = true, score = null, navigateOnSave = true, auto = false } = {}) => {
     if (!ex) return push('No exercise selected', 'error');
+    if (!isScheduled) {
+      if (!auto) push('Practice session finished. Result not submitted (practice mode).', 'info');
+      return true;
+    }
     if (saveStatus === 'saved') {
       if (!auto) push('Results already saved for this session.', 'info');
       return true;
@@ -805,7 +810,7 @@ export default function ExerciseRunner() {
       setSaveStatus('error');
     }
     return saved;
-  }, [authFetch, ex, saveStatus, initialTime, timeLeft, reps, difficulty, recordingBlobUrl, repStats, push, navigate, heartRate, markComplete]);
+  }, [authFetch, ex, saveStatus, initialTime, timeLeft, reps, difficulty, recordingBlobUrl, repStats, push, navigate, heartRate, markComplete, isScheduled]);
 
   useEffect(() => {
     submitResultRef.current = submitResult;
@@ -955,23 +960,27 @@ export default function ExerciseRunner() {
               <div className="mb-2 p-3 rounded border border-green-700 bg-gray-800">
                 <div className="font-semibold text-green-300">Session complete</div>
                 <div className="text-xs text-gray-300 mt-1">
-                  {saveStatus === 'saving'
-                    ? 'Saving results...'
-                    : saveStatus === 'saved'
-                      ? 'Results saved and sent to your therapist.'
-                      : saveStatus === 'error'
-                        ? 'Failed to save results. Please try again.'
-                        : 'Results are ready to save.'}
+                  {isScheduled
+                    ? (saveStatus === 'saving'
+                      ? 'Saving results...'
+                      : saveStatus === 'saved'
+                        ? 'Results saved and sent to your therapist.'
+                        : saveStatus === 'error'
+                          ? 'Failed to save results. Please try again.'
+                          : 'Results are ready to save.')
+                    : 'Practice session finished. Result not submitted.'}
                 </div>
                 <div className="mt-2 flex gap-2">
                   <button onClick={handleRestart} className="bg-indigo-600 px-3 py-2 rounded">Restart</button>
-                  <button
-                    onClick={()=>submitResult({completed:true, navigateOnSave:false})}
-                    disabled={saveStatus === 'saving' || saveStatus === 'saved'}
-                    className={`px-3 py-2 rounded ${saveStatus === 'saving' || saveStatus === 'saved' ? 'bg-gray-700 text-gray-400' : 'bg-green-600 text-white'}`}
-                  >
-                    {saveStatus === 'saved' ? 'Saved' : 'Save Results'}
-                  </button>
+                  {isScheduled && (
+                    <button
+                      onClick={()=>submitResult({completed:true, navigateOnSave:false})}
+                      disabled={saveStatus === 'saving' || saveStatus === 'saved'}
+                      className={`px-3 py-2 rounded ${saveStatus === 'saving' || saveStatus === 'saved' ? 'bg-gray-700 text-gray-400' : 'bg-green-600 text-white'}`}
+                    >
+                      {saveStatus === 'saved' ? 'Saved' : 'Save Results'}
+                    </button>
+                  )}
                   <button onClick={()=>navigate('/exercises', { state: { refresh: true } })} className="bg-gray-700 px-3 py-2 rounded">Exit</button>
                 </div>
               </div>
@@ -1000,13 +1009,15 @@ export default function ExerciseRunner() {
 
         <section className="flex gap-2 justify-end">
           <button onClick={()=>navigate('/exercises')} className="bg-gray-700 px-4 py-2 rounded">Back</button>
-          <button
-            onClick={()=>submitResult({completed:true})}
-            disabled={saveStatus === 'saving' || saveStatus === 'saved'}
-            className={`px-4 py-2 rounded ${saveStatus === 'saving' || saveStatus === 'saved' ? 'bg-gray-700 text-gray-400' : 'bg-green-600 text-white'}`}
-          >
-            {saveStatus === 'saved' ? 'Saved' : saveStatus === 'saving' ? 'Saving...' : 'Save Results'}
-          </button>
+          {isScheduled && (
+            <button
+              onClick={()=>submitResult({completed:true})}
+              disabled={saveStatus === 'saving' || saveStatus === 'saved'}
+              className={`px-4 py-2 rounded ${saveStatus === 'saving' || saveStatus === 'saved' ? 'bg-gray-700 text-gray-400' : 'bg-green-600 text-white'}`}
+            >
+              {saveStatus === 'saved' ? 'Saved' : saveStatus === 'saving' ? 'Saving...' : 'Save Results'}
+            </button>
+          )}
         </section>
       </div>
     </main>

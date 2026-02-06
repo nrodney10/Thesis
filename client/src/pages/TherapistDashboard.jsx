@@ -797,7 +797,7 @@ export default function TherapistDashboard() {
                     {patientFitbitStatus === 'not-connected' && 'Patient has not connected Fitbit.'}
                     {patientFitbitStatus === 'error' && 'Error fetching heart rate.'}
                     {patientFitbitStatus === 'connected' && patientHrStale && (
-                      <span>Last: {patientHeartRateFallback?.when || 'recent'} (stale)</span>
+                      <span>Last: {patientHeartRateFallback?.when || 'recent'}</span>
                     )}
                     {patientFitbitStatus === 'connected' && !patientHrStale && 'Live or recent reading'}
                     {patientFitbitStatus === 'idle' && 'Select a patient to view heart rate.'}

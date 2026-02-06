@@ -147,7 +147,7 @@ export default function PatientDashboard() {
                     </div>
                     <div className="text-xs mt-1 text-gray-300">
                       {fitbitStatus === 'connected' && (
-                        <span>{isStale ? `Last: ${fallbackHR?.when ?? 'recent'} (stale)` : ''}</span>
+                        <span>{isStale ? `Last: ${fallbackHR?.when ?? 'recent'}` : ''}</span>
                       )}
                       {fitbitStatus === 'not-connected' && (
                         <div>

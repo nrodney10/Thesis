@@ -6,6 +6,8 @@ export const markCompletedForUser = async (exerciseId, userId) => {
     const ex = await Exercise.findById(exerciseId);
     if (!ex) return { ok: false, reason: 'not-found' };
     if (!ex.assignedTo.map(String).includes(String(userId))) return { ok: false, reason: 'not-assigned' };
+    // Only scheduled items (with dueAt) should lock as completed
+    if (!ex.dueAt) return { ok: true, skipped: true, reason: 'not-scheduled' };
     const now = new Date();
     const completions = ex.completions || [];
     const idx = completions.findIndex((c) => String(c.userId) === String(userId));

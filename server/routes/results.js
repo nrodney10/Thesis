@@ -71,8 +71,10 @@ router.post("/", verifyToken, validateBody(payloadSchema), async (req, res) => {
     try {
       const patient = await User.findById(req.user.id).select('therapistId name');
       if (patient?.therapistId) {
-        const ex = await Exercise.findById(exerciseId).select('title');
-        await createNotification(patient.therapistId, 'Exercise finished', `${patient.name} finished exercise: ${ex?.title || exerciseId}`, { exerciseId, event:'finish', resultId: newResult._id });
+        const ex = await Exercise.findById(exerciseId).select('title dueAt');
+        if (ex?.dueAt) {
+          await createNotification(patient.therapistId, 'Exercise finished', `${patient.name} finished exercise: ${ex?.title || exerciseId}`, { exerciseId, event:'finish', resultId: newResult._id });
+        }
       }
     } catch (_) {}
     res.status(201).json({ success: true, result: newResult });
@@ -114,8 +116,10 @@ router.post("/upload", verifyToken, upload.single('video'), async (req, res) => 
     try {
       const patient = await User.findById(req.user.id).select('therapistId name');
       if (patient?.therapistId) {
-        const ex = await Exercise.findById(exerciseId).select('title');
-        await createNotification(patient.therapistId, 'Exercise finished', `${patient.name} finished exercise: ${ex?.title || exerciseId}`, { exerciseId, event:'finish', resultId: newResult._id });
+        const ex = await Exercise.findById(exerciseId).select('title dueAt');
+        if (ex?.dueAt) {
+          await createNotification(patient.therapistId, 'Exercise finished', `${patient.name} finished exercise: ${ex?.title || exerciseId}`, { exerciseId, event:'finish', resultId: newResult._id });
+        }
       }
     } catch (_) {}
     res.status(201).json({ success: true, result: newResult });
