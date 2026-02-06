@@ -71,7 +71,7 @@ export default function Register() {
           </div>
         )}
         <h1 className="text-3xl font-bold text-center text-white mb-6">
-          RodRecover Registration 🩺
+          RodRecover Registration
         </h1>
 
         <input
