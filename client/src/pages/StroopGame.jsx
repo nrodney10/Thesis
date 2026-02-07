@@ -17,7 +17,7 @@ export default function StroopGame({ assignmentId, assignmentTitle, gameKey = 's
   const [times, setTimes] = useState([]);
   const [selectedOption, setSelectedOption] = useState(null);
   const [finished, setFinished] = useState(false);
-  const [saveStatus, setSaveStatus] = useState('idle'); // idle | saving | saved | error
+  const [saveStatus, setSaveStatus] = useState('idle');
   const [finalStats, setFinalStats] = useState(null);
   const [pendingPayload, setPendingPayload] = useState(null);
   const markComplete = useCallback(async () => {

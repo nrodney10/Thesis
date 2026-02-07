@@ -4,7 +4,6 @@ import { verifyToken } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-// Export results for current user or ?userId= (therapist only)
 router.get('/export.csv', verifyToken, async (req, res) => {
   try {
     const queryUserId = req.query.userId || req.user.id;
@@ -26,7 +25,6 @@ router.get('/export.csv', verifyToken, async (req, res) => {
       duration: r.metadata?.duration ?? '',
       heartRate: r.metadata?.heartRate ?? '',
     }));
-    // Manual CSV build (avoid external dependency)
     const fields = ['id','createdAt','type','score','exerciseId','reps','duration','heartRate'];
     const esc = (v) => {
       if (v == null) return '';
@@ -42,11 +40,9 @@ router.get('/export.csv', verifyToken, async (req, res) => {
 
 export default router;
 
-// Therapist summary (avg scores & counts per patient)
 router.get('/summary', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success:false, message:'Forbidden' });
-    // restrict summary to patients assigned to this therapist
     const patients = await (await import('../models/User.js')).default.find({ therapistId: req.user.id }).select('_id');
     const patientIds = patients.map(p => p._id);
     const agg = await Result.aggregate([

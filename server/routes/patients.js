@@ -5,7 +5,6 @@ import { createNotification } from '../utils/createNotification.js';
 
 const router = express.Router();
 
-// GET /api/patients - therapist-only: return list of patients assigned to this therapist
 router.get("/", verifyToken, async (req, res) => {
   try {
     if (req.user.role !== "therapist") {
@@ -20,15 +19,9 @@ router.get("/", verifyToken, async (req, res) => {
   }
 });
 
-// GET /api/patients/available - therapist-only: patients that are not assigned to any therapist
-// NOTE: We return any patient with no `therapistId`. These will include patients who
-// may already have a pending therapist request; therapists can still send a request
-// which the patient will be prompted to accept. If you want to hide patients with
-// pending requests, reintroduce the pendingTherapistId filter.
 router.get('/available', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success:false, message:'Forbidden' });
-    // Include any patient with no therapist (therapistId missing or null)
     const patients = await User.find({
       role: 'patient',
       $or: [
@@ -43,7 +36,6 @@ router.get('/available', verifyToken, async (req, res) => {
   }
 });
 
-// List available therapists (for patients to browse)
 router.get('/therapists', verifyToken, async (req, res) => {
   try {
     const therapists = await User.find({ role: 'therapist' }).select('_id name email');
@@ -54,14 +46,12 @@ router.get('/therapists', verifyToken, async (req, res) => {
   }
 });
 
-// GET /api/patients/:id - return a single patient's public info
 router.get('/:id', verifyToken, async (req, res) => {
   try {
     const patientId = req.params.id;
     const patient = await User.findById(patientId).select('-password');
     if (!patient || patient.role !== 'patient') return res.status(404).json({ success: false, message: 'Patient not found' });
 
-    // Patients may fetch their own record; therapists may fetch only their assigned patients
     if (req.user.role === 'patient' && String(req.user.id) !== String(patientId)) {
       return res.status(403).json({ success: false, message: 'Forbidden' });
     }
@@ -76,20 +66,17 @@ router.get('/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Assign therapist to patient
 router.post('/:id/assign-therapist', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success:false, message:'Forbidden' });
     const patientId = req.params.id;
     const patient = await User.findById(patientId);
     if (!patient || patient.role !== 'patient') return res.status(404).json({ success:false, message:'Patient not found' });
-    // Only allow if patient is not already assigned and not already pending
     if (patient.therapistId) return res.status(400).json({ success:false, message:'Patient already has a therapist' });
     if (patient.pendingTherapistId) return res.status(400).json({ success:false, message:'Patient already has a pending request' });
-    // create pending request; patient must accept
     patient.pendingTherapistId = req.user.id;
     await patient.save();
-    // notify patient
+
     try {
       const Notification = (await import('../models/Notification.js')).default;
       await Notification.create({
@@ -106,7 +93,6 @@ router.post('/:id/assign-therapist', verifyToken, async (req, res) => {
   }
 });
 
-// Patient requests a therapist (patient -> therapist request)
 router.post('/therapists/:id/request', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'patient') return res.status(403).json({ success:false, message:'Forbidden' });
@@ -117,7 +103,6 @@ router.post('/therapists/:id/request', verifyToken, async (req, res) => {
     if (!patient) return res.status(404).json({ success:false, message:'Patient not found' });
     patient.pendingTherapistId = therapistId;
     await patient.save();
-    // notify therapist
     try {
       await createNotification(therapist._id, 'Patient request', `${patient.name || 'A patient'} requested you as their therapist.`, { type:'patient-request', patientId: patient._id, patientName: patient.name || 'Patient' });
     } catch (e) { console.warn('notify therapist failed', e.message); }
@@ -128,14 +113,12 @@ router.post('/therapists/:id/request', verifyToken, async (req, res) => {
   }
 });
 
-// Patient responds to therapist request
 router.post('/respond-therapist', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'patient') return res.status(403).json({ success:false, message:'Forbidden' });
     const { action, therapistId } = req.body || {};
     const patient = await User.findById(req.user.id);
     if (!patient) return res.status(404).json({ success:false, message:'Patient not found' });
-    // allow fallback if pending wasn't set but therapistId provided
     if (!patient.pendingTherapistId && therapistId) {
       patient.pendingTherapistId = therapistId;
     }
@@ -144,11 +127,9 @@ router.post('/respond-therapist', verifyToken, async (req, res) => {
       patient.therapistId = patient.pendingTherapistId;
       patient.pendingTherapistId = undefined;
       await patient.save();
-      // remove therapist request notifications for this patient
       try {
         const Notification = (await import('../models/Notification.js')).default;
         await Notification.deleteMany({ userId: patient._id, 'data.type': 'therapist-request' });
-        // notify therapist of acceptance
         await Notification.create({
           userId: patient.therapistId,
           title: 'Patient accepted',
@@ -174,7 +155,6 @@ router.post('/respond-therapist', verifyToken, async (req, res) => {
   }
 });
 
-// Therapist can remove themselves from a patient
 router.post('/:id/unassign-therapist', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success:false, message:'Forbidden' });
@@ -203,7 +183,6 @@ router.post('/:id/unassign-therapist', verifyToken, async (req, res) => {
   }
 });
 
-// Therapist responds to patient request (accept/decline)
 router.post('/respond-patient', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success:false, message:'Forbidden' });
@@ -211,7 +190,6 @@ router.post('/respond-patient', verifyToken, async (req, res) => {
     if (!patientId) return res.status(400).json({ success:false, message:'Missing patientId' });
     const patient = await User.findById(patientId);
     if (!patient || patient.role !== 'patient') return res.status(404).json({ success:false, message:'Patient not found' });
-    // ensure the pending request targets this therapist
     if (!patient.pendingTherapistId || String(patient.pendingTherapistId) !== String(req.user.id)) {
       return res.status(400).json({ success:false, message:'No pending request for you' });
     }
@@ -219,7 +197,6 @@ router.post('/respond-patient', verifyToken, async (req, res) => {
       patient.therapistId = req.user.id;
       patient.pendingTherapistId = undefined;
       await patient.save();
-      // notify patient of acceptance
       try {
         await createNotification(patient._id, 'Therapist accepted', `${req.user.name || 'Therapist'} accepted your request.`, { type:'therapist-accepted', therapistId: req.user.id, therapistName: req.user.name || 'Therapist' });
       } catch (e) { console.warn('notify patient failed', e.message); }
@@ -238,7 +215,6 @@ router.post('/respond-patient', verifyToken, async (req, res) => {
   }
 });
 
-// Update patient vulnerability profile (therapist only)
 router.put('/:id/vulnerabilities', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success:false, message:'Forbidden' });

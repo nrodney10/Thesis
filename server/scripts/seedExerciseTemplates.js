@@ -49,8 +49,6 @@ async function run(){
     } else {
       console.log('Template already exists:', tTitle);
     }
-
-    // Elbow 90 deg template
     const eTitle = 'Elbow 90 deg Hold';
     let etpl = await ExerciseTemplate.findOne({ title: eTitle, createdBy: therapist._id });
     if (!etpl) {
@@ -77,7 +75,6 @@ async function run(){
       console.log('Template already exists:', eTitle);
     }
 
-    // Bodyweight squat template
     const sTitle = 'Bodyweight Squat Hold';
     let stpl = await ExerciseTemplate.findOne({ title: sTitle, createdBy: therapist._id });
     if (!stpl) {

@@ -8,7 +8,6 @@ import { autoAllocateForPatient } from '../utils/autoAllocate.js';
 
 const router = express.Router();
 
-// List templates (therapist only)
 router.get('/', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
@@ -20,7 +19,6 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-// Create template
 router.post('/', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
@@ -53,7 +51,6 @@ router.post('/', verifyToken, async (req, res) => {
   }
 });
 
-// Update template (therapist only)
 router.put('/:id', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
@@ -104,7 +101,6 @@ router.put('/:id', verifyToken, async (req, res) => {
   }
 });
 
-// AI-inspired allocation: pick best-matching templates for a patient based on vulnerability tags
 router.post('/auto-allocate', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
@@ -113,11 +109,9 @@ router.post('/auto-allocate', verifyToken, async (req, res) => {
     const patient = await User.findById(patientId);
     if (!patient || patient.role !== 'patient') return res.status(404).json({ success: false, error: 'Patient not found' });
     if (String(patient.therapistId) !== String(req.user.id)) return res.status(403).json({ success:false, error:'Forbidden' });
-
-    // delegate to utility which accepts optional vulnerabilities override and returns matches
     const r = await autoAllocateForPatient(patientId, { limit, dueAt, dailyReminder, vulnerabilities, allowDuplicates });
     if (!r.success) return res.status(400).json({ success: false, error: r.reason || 'No matches' });
-    // response already contains exercises and matches
+  
     return res.json(r);
   } catch (e) {
     console.error('POST /api/templates/auto-allocate', e);
@@ -125,7 +119,6 @@ router.post('/auto-allocate', verifyToken, async (req, res) => {
   }
 });
 
-// Auto-allocate immediately for a patient using their stored vulnerabilityProfile (no manual tags needed)
 router.post('/auto-allocate/for-patient/:id', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
@@ -143,7 +136,6 @@ router.post('/auto-allocate/for-patient/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Instantiate template into concrete exercise without altering template
 router.post('/:id/instantiate', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
@@ -153,7 +145,6 @@ router.post('/:id/instantiate', verifyToken, async (req, res) => {
 
     const { assignedTo = [], overrides = {}, dueAt, dailyReminder } = req.body || {};
 
-    // validate assigned users exist
     if (!Array.isArray(assignedTo)) return res.status(400).json({ success: false, error: 'assignedTo must be an array of user IDs' });
     const validAssigned = [];
     const invalid = [];
@@ -165,7 +156,6 @@ router.post('/:id/instantiate', verifyToken, async (req, res) => {
     }
     if (validAssigned.length === 0) return res.status(400).json({ success: false, error: 'No valid patient assignees provided or patients not assigned to you', invalid });
 
-    // sanitize overrides.poseConfig: remove empty-string fields so they don't overwrite template defaults
     if (overrides && typeof overrides === 'object' && overrides.poseConfig && typeof overrides.poseConfig === 'object') {
       for (const k of Object.keys(overrides.poseConfig)) {
         if (overrides.poseConfig[k] === '' || overrides.poseConfig[k] === null || overrides.poseConfig[k] === undefined) {
@@ -173,7 +163,6 @@ router.post('/:id/instantiate', verifyToken, async (req, res) => {
         }
       }
       if (overrides.poseConfig.targets && typeof overrides.poseConfig.targets === 'object') {
-        // drop empty target fields
         for (const k of Object.keys(overrides.poseConfig.targets)) {
           const val = overrides.poseConfig.targets[k];
           if (val === '' || val === null || val === undefined) delete overrides.poseConfig.targets[k];
@@ -184,12 +173,9 @@ router.post('/:id/instantiate', verifyToken, async (req, res) => {
         }
         if (Object.keys(overrides.poseConfig.targets).length === 0) delete overrides.poseConfig.targets;
       }
-      // If poseConfig ends up empty, remove it
       if (Object.keys(overrides.poseConfig).length === 0) delete overrides.poseConfig;
     }
 
-    // avoid duplicate assignment of same template to same patient
-    // Allow a scheduled instance even if a prior practice (undated) exists; block duplicates only when no due date provided
     if (!dueAt) {
       const dupExists = await Exercise.findOne({
         templateId: tpl._id,
@@ -200,7 +186,6 @@ router.post('/:id/instantiate', verifyToken, async (req, res) => {
       if (dupExists) return res.status(400).json({ success:false, error:'Already assigned from this template to this patient' });
     }
 
-    // merge with overrides (shallow for simplicity)
     const exerciseDoc = new Exercise({
       title: overrides.title || tpl.title,
       description: overrides.description || tpl.description,
@@ -214,7 +199,6 @@ router.post('/:id/instantiate', verifyToken, async (req, res) => {
       dailyReminder: !!dailyReminder
     });
     await exerciseDoc.save();
-    // notify assigned patients
     for (const uid of validAssigned) {
       await createNotification(uid, 'New activity assigned', `Your therapist assigned: ${exerciseDoc.title}`, { exerciseId: exerciseDoc._id, event: 'assigned', templateId: tpl._id });
     }
@@ -225,7 +209,6 @@ router.post('/:id/instantiate', verifyToken, async (req, res) => {
   }
 });
 
-// Delete a template (therapist only)
 router.delete('/:id', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });

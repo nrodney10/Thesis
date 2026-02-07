@@ -15,7 +15,6 @@ const calculateAge = (dob) => {
   return age;
 };
 
-// REGISTER
 router.post("/register", async (req, res) => {
   try {
     const { name, email, password, role, dateOfBirth } = req.body;
@@ -27,16 +26,11 @@ router.post("/register", async (req, res) => {
     const age = calculateAge(dob);
     if (age < 0) return res.status(400).json({ message: "Invalid date of birth" });
 
-    // Check for existing email
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ message: "Email already registered" });
     }
-
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Save new user
     const newUser = new User({
       name,
       age,
@@ -46,8 +40,6 @@ router.post("/register", async (req, res) => {
       role,
     });
     await newUser.save();
-
-    // Sign JWT token
     const token = jwt.sign(
       { id: newUser._id, name: newUser.name, role: newUser.role },
       process.env.JWT_SECRET,
@@ -83,7 +75,6 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ message: "Invalid email or password" });
     }
 
-    //SUCCESS — issue JWT and return user + token
     const token = jwt.sign(
       { id: user._id, name: user.name, role: user.role },
       process.env.JWT_SECRET,
@@ -102,7 +93,7 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// FORGOT PASSWORD - generate reset token and send link
+// FORGOT PASSWORD
 router.post("/forgot", async (req, res) => {
   try {
     const { email } = req.body;

@@ -7,7 +7,7 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   role: { type: String, enum: ["patient", "therapist"], required: true },
-  therapistId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // patient -> therapist link
+  therapistId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   vulnerabilityProfile: {
     tags: [{ type: String }],
     notes: { type: String }
@@ -27,7 +27,6 @@ const userSchema = new mongoose.Schema({
       recordedAt: { type: Date },
       source: { type: String }
     },
-    // PKCE support (persist across restarts)
     pkceVerifier: { type: String },
     pkceCreatedAt: { type: Date }
   }

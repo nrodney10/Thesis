@@ -5,7 +5,6 @@ import Message from '../models/Message.js';
 
 const router = express.Router();
 
-// Return unread counts for notifications + messages
 router.get('/', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;

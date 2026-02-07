@@ -7,7 +7,6 @@ export function validateBody(schema) {
       req.validatedBody = parsed;
       return next();
     } catch (err) {
-      // ZodError
       return res.status(400).json({ success: false, message: 'Invalid payload', errors: err.errors });
     }
   };

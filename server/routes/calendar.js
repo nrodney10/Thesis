@@ -24,7 +24,7 @@ const dateFilterForQuery = (query) => {
   return { dueAt: { $gte: start, $lt: end } };
 };
 
-// Patient view: upcoming activities for the logged-in patient
+// Patient view
 router.get('/patient', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'patient') return res.status(403).json({ success: false, error: 'Forbidden' });
@@ -58,7 +58,6 @@ router.get('/patient', verifyToken, async (req, res) => {
   }
 });
 
-// Therapist view: upcoming activities across their patients
 router.get('/therapist', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
@@ -95,7 +94,7 @@ router.get('/therapist', verifyToken, async (req, res) => {
   }
 });
 
-// Therapist view: upcoming activities for a specific patient
+// Therapist view -upcoming activities for a specific patient
 router.get('/patient/:id', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });

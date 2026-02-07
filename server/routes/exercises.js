@@ -9,16 +9,12 @@ import { markCompletedForUser } from '../utils/markCompleted.js';
 
 const router = express.Router();
 
-// GET /api/exercises
-// Therapists: return all exercises
-// Patients: return exercises assigned to them
 router.get('/', verifyToken, async (req, res) => {
   try {
     if (req.user.role === 'therapist') {
       const list = await Exercise.find().populate('createdBy', 'name');
       return res.json({ success: true, exercises: list });
     }
-    // patient
     const list = await Exercise.find({ assignedTo: req.user.id });
     return res.json({ success: true, exercises: list });
   } catch (err) {
@@ -27,8 +23,6 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-// POST /api/exercises
-// Therapist creates exercise and optionally assigns to patient IDs
 router.post('/', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
@@ -53,7 +47,6 @@ router.post('/', verifyToken, async (req, res) => {
     })();
     if (!title || typeof title !== 'string' || title.length < 3) return res.status(400).json({ success: false, error: 'Title is required (min 3 chars)' });
 
-    // validate assignedTo are existing users and that each patient has this therapist
     const validAssigned = [];
     const invalid = [];
     for (const id of assignedTo) {
@@ -67,8 +60,6 @@ router.post('/', verifyToken, async (req, res) => {
     const meta = { ...(metadata || {}) };
     if (!meta.assignmentType) meta.assignmentType = 'exercise';
 
-    // avoid duplicate assignments of same type/title to same patient (games and exercises)
-    // allow scheduling a new dated assignment even if a practice (undated) exists
     if (validAssigned.length && !dueAt) {
       const assignType = meta.assignmentType || 'exercise';
       const dup = await Exercise.findOne({
@@ -83,7 +74,6 @@ router.post('/', verifyToken, async (req, res) => {
     const ex = new Exercise({ title, description, assignedTo: validAssigned, metadata: meta, poseConfig, createdBy: req.user.id, dueAt: dueAt ? new Date(dueAt) : undefined, dailyReminder: !!dailyReminder });
     await ex.save();
 
-    // notify assigned users (non-blocking)
     if (validAssigned.length) {
       const label = meta.assignmentType === 'game' ? 'game' : 'exercise';
       notifyUsers(validAssigned, `A new ${label} has been assigned: ${title}`, `Your therapist assigned a new ${label}: ${title}`)
@@ -104,9 +94,6 @@ router.post('/', verifyToken, async (req, res) => {
   }
 });
 
-// DELETE /api/exercises/patient/:patientId
-// Therapist selects exercises to remove for a specific patient.
-// If an exercise is only assigned to that patient it is deleted; otherwise the patient assignment is removed.
 router.delete('/patient/:patientId', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
@@ -120,7 +107,6 @@ router.delete('/patient/:patientId', verifyToken, async (req, res) => {
     const patient = await User.findById(patientId);
     if (!patient || patient.role !== 'patient') return res.status(404).json({ success: false, error: 'Patient not found' });
 
-    // filter out invalid ids to avoid CastErrors
     const validIds = exerciseIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
     if (validIds.length === 0) return res.status(400).json({ success: false, error: 'No valid exercise IDs provided' });
 
@@ -157,13 +143,11 @@ router.delete('/patient/:patientId', verifyToken, async (req, res) => {
   }
 });
 
-// Patient starts exercise
 router.post('/:id/start', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'patient') return res.status(403).json({ success:false });
     const ex = await Exercise.findById(req.params.id);
     if (!ex || !ex.assignedTo.map(String).includes(req.user.id)) return res.status(404).json({ success:false, message:'Exercise not found' });
-    // Notify therapist if linked
     const patient = await User.findById(req.user.id).select('therapistId name');
     if (patient?.therapistId) {
       await createNotification(patient.therapistId, 'Exercise started', `${patient.name} started exercise: ${ex.title}`, { exerciseId: ex._id, event:'start' });
@@ -172,7 +156,6 @@ router.post('/:id/start', verifyToken, async (req, res) => {
   } catch (e) { console.error('start exercise error', e); res.status(500).json({ success:false }); }
 });
 
-// Patient marks exercise/game completed (used to lock repeat play)
 router.post('/:id/complete', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'patient') return res.status(403).json({ success:false, error:'Forbidden' });
@@ -189,7 +172,6 @@ router.post('/:id/complete', verifyToken, async (req, res) => {
   }
 });
 
-// Patient skips exercise
 router.post('/:id/skip', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'patient') return res.status(403).json({ success:false });
@@ -204,8 +186,6 @@ router.post('/:id/skip', verifyToken, async (req, res) => {
 });
 
 export default router;
-
-// Manual trigger for reminders (can be called by external cron)
 router.post('/run-reminders', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success:false });
@@ -234,7 +214,7 @@ router.post('/run-reminders', verifyToken, async (req, res) => {
   } catch (e) { console.error('run reminders error', e); res.status(500).json({ success:false }); }
 });
 
-// Update an exercise (therapist only, must be creator)
+// Update an exercise
 router.put('/:id', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
@@ -258,7 +238,7 @@ router.put('/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Delete an exercise (therapist only, must be creator)
+// Delete an exercise
 router.delete('/:id', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });

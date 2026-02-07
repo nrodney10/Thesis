@@ -13,19 +13,16 @@ import { markCompletedForUser } from "../utils/markCompleted.js";
 
 const router = express.Router();
 
-// Ensure uploads directory exists for multipart uploads
 const uploadsDir = path.join(process.cwd(), "uploads");
-try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch (e) { /* ignore */ }
+try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch (e) {  }
 
 const upload = multer({ dest: uploadsDir });
 
-// Schemas
 const poseMetricsSchema = z.object({
   reps: z.number().min(0),
   lastAngle: z.number().nullable().optional(),
   state: z.enum(["up", "down", "unknown", "hold"]).optional(),
   samples: z.array(z.number()).optional(),
-  // Extended metrics for physical progress
   minAngle: z.number().optional(),
   maxAngle: z.number().optional(),
   avgAngle: z.number().optional(),
@@ -53,7 +50,6 @@ const payloadSchema = z.object({
   metadata: metadataSchema,
 });
 
-// Create a new result (protected) - JSON body
 router.post("/", verifyToken, validateBody(payloadSchema), async (req, res) => {
   try {
     const { exerciseId, type, score, metadata } = req.validatedBody;
@@ -65,9 +61,7 @@ router.post("/", verifyToken, validateBody(payloadSchema), async (req, res) => {
       metadata,
     });
     await newResult.save();
-    // mark completed for assigned exercises/games to prevent replay
     try { await markCompletedForUser(exerciseId, req.user.id); } catch (e) { console.warn('markCompletedForUser (json) failed', e?.message); }
-    // Notify therapist of completion
     try {
       const patient = await User.findById(req.user.id).select('therapistId name');
       if (patient?.therapistId) {
@@ -84,7 +78,6 @@ router.post("/", verifyToken, validateBody(payloadSchema), async (req, res) => {
   }
 });
 
-// Upload endpoint: accepts multipart with 'video' file and 'payload' JSON field
 router.post("/upload", verifyToken, upload.single('video'), async (req, res) => {
   try {
     let payload = null;
@@ -95,12 +88,10 @@ router.post("/upload", verifyToken, upload.single('video'), async (req, res) => 
     }
     if (!payload) return res.status(400).json({ success: false, message: 'Missing payload' });
 
-    // Validate payload
     const parsed = payloadSchema.safeParse(payload);
     if (!parsed.success) return res.status(400).json({ success: false, message: 'Invalid payload', errors: parsed.error.errors });
 
     const { exerciseId, type, score, metadata } = parsed.data;
-    // attach file path to metadata
     const filePath = req.file ? path.relative(process.cwd(), req.file.path) : null;
     const fullMetadata = Object.assign({}, metadata || {}, { video: !!req.file, videoPath: filePath });
 
@@ -129,25 +120,23 @@ router.post("/upload", verifyToken, upload.single('video'), async (req, res) => 
   }
 });
 
-// Get results for a user (therapist can pass ?userId=...)
 router.get("/", verifyToken, async (req, res) => {
   try {
     const queryUserId = req.query.userId;
 
-    // Patients can only request their own results
     if (req.user.role === "patient" && queryUserId && queryUserId !== req.user.id) {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
     const filter = {};
     if (queryUserId) {
-      // therapists may request patient results only for patients assigned to them
+
       if (req.user.role === 'therapist') {
         const patient = await User.findById(queryUserId).select('therapistId');
         if (!patient || String(patient.therapistId) !== String(req.user.id)) return res.status(403).json({ success:false, message:'Forbidden' });
         filter.userId = queryUserId;
       } else {
-        // patients cannot request other users
+
         if (req.user.id !== queryUserId) return res.status(403).json({ success:false, message:'Forbidden' });
         filter.userId = req.user.id;
       }

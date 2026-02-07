@@ -516,7 +516,6 @@ export default function TherapistDashboard() {
   }, [patients, search]);
 
   useEffect(() => {
-    // if current selection falls out of filtered list, pick the first filtered patient
     if (filteredPatients.length === 0) {
       setSelectedPatient(null);
       setRecentResults([]);
@@ -619,7 +618,7 @@ export default function TherapistDashboard() {
     <div className="min-h-screen bg-gray-900 text-gray-100">
       <div className="container mx-auto p-6">
         <div className="grid grid-cols-12 gap-6">
-          {/* Sidebar */}
+          {}
           <aside className="col-span-2 bg-gray-800 rounded-lg p-4 shadow-inner">
             <div className="mb-6 text-center">
               <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-purple-600 to-indigo-500 flex items-center justify-center text-xl font-bold">TR</div>
@@ -659,7 +658,7 @@ export default function TherapistDashboard() {
             </nav>
           </aside>
 
-          {/* Main area */}
+          {}
           <main className="col-span-7">
             <div className="text-center mb-4">
               <img
@@ -680,7 +679,7 @@ export default function TherapistDashboard() {
                 <button className="px-3 py-2 bg-indigo-600 rounded text-sm" onClick={()=>navigate('/register')}>
                   New Patient
                 </button>
-                {/* View Results button removed per request */}
+                {}
               </div>
             </div>
 
@@ -760,10 +759,10 @@ export default function TherapistDashboard() {
               </div>
             </div>
 
-            {/* Recent activity moved to the Results page (use 'View Results') */}
+            {}
           </main>
 
-          {/* Right column */}
+          {}
           <aside className="col-span-3">
             <div className="bg-gradient-to-br from-gray-800 to-gray-700 rounded-lg p-4 mb-4 shadow">
               <h4 className="text-sm text-gray-300">Selected patient</h4>
@@ -784,7 +783,6 @@ export default function TherapistDashboard() {
                         const j = await res.json();
                         if (j.success) {
                           push('Patient unassigned', 'success');
-                          // refresh patient list and clear selection
                           try { const r = await authFetch('http://localhost:5000/api/patients'); const j2 = await r.json(); if (j2.success) setPatients(j2.patients||[]); } catch(_){}
                           setSelectedPatient(null);
                           setRecentResults([]);

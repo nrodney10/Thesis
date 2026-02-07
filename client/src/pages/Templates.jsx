@@ -206,7 +206,7 @@ export default function Templates() {
           </div>
         </section>
 
-        {/* Assignment UI moved to Exercises page */}
+        {}
       </div>
     </main>
   );

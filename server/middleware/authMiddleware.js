@@ -6,7 +6,6 @@ export const verifyToken = (req, res, next) => {
   if (authHeader && authHeader.startsWith("Bearer ")) {
     token = authHeader.split(" ")[1];
   } else if (req.query && req.query.token) {
-    // Allow token passed as query param for OAuth redirect flows opened via window.open
     token = req.query.token;
   }
 
@@ -16,7 +15,7 @@ export const verifyToken = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded; // attach user info (id, name, role)
+    req.user = decoded;
     next();
   } catch (err) {
     console.error("Invalid token:", err);

@@ -5,11 +5,9 @@ import User from '../models/User.js';
 
 const router = express.Router();
 
-// Get current user profile
 router.get('/me', verifyToken, async (req, res) => {
   const u = await User.findById(req.user.id).select('-password');
   if (!u) return res.status(404).json({ success:false, message:'User not found' });
-  // If this user has an assigned therapist, include a friendly name for clients
   const userObj = u.toObject ? u.toObject() : { ...u };
   try {
     if (userObj.therapistId) {
@@ -17,12 +15,10 @@ router.get('/me', verifyToken, async (req, res) => {
       if (t) userObj.therapistName = t.name || (t.email ? t.email.split('@')[0] : 'Therapist');
     }
   } catch (e) {
-    // ignore lookup errors
   }
   res.json({ success:true, user: userObj });
 });
 
-// Update profile (name, email, vulnerabilityProfile)
 router.put('/me', verifyToken, async (req, res) => {
   try {
     const { name, email, vulnerabilityProfile } = req.body;
@@ -43,7 +39,6 @@ router.put('/me', verifyToken, async (req, res) => {
   } catch (e) { res.status(500).json({ success:false, message:'Server error' }); }
 });
 
-// Change password
 router.put('/me/password', verifyToken, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -59,7 +54,6 @@ router.put('/me/password', verifyToken, async (req, res) => {
 
 export default router;
 
-// List therapists (basic info) – can be used by patients to target messages
 router.get('/therapists', verifyToken, async (req, res) => {
   try {
     const therapists = await User.find({ role: 'therapist' }).select('_id name email');

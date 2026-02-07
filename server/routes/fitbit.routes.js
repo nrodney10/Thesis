@@ -9,7 +9,6 @@ const FITBIT_AUTH_URL = 'https://www.fitbit.com/oauth2/authorize';
 const FITBIT_TOKEN_URL = 'https://api.fitbit.com/oauth2/token';
 const FITBIT_API = 'https://api.fitbit.com';
 
-// Simple in-memory PKCE store for local dev (maps state/userId -> code_verifier)
 const pkceStore = new Map();
 
 function b64(str) { return Buffer.from(str, 'utf8').toString('base64'); }
@@ -27,7 +26,6 @@ function getEnv(){
   return { FITBIT_CLIENT_ID, FITBIT_CLIENT_SECRET, FITBIT_REDIRECT_URI };
 }
 
-// Extract a usable BPM from daily summary (works even when intraday access is not granted)
 function extractSummaryBpm(data) {
   try {
     const arr = data?.['activities-heart'];
@@ -42,7 +40,6 @@ function extractSummaryBpm(data) {
   return null;
 }
 
-// Connect Fitbit for the currently logged-in user
 router.get('/connect', verifyToken, async (req, res) => {
   try {
     const { FITBIT_CLIENT_ID, FITBIT_REDIRECT_URI } = getEnv();
@@ -50,7 +47,6 @@ router.get('/connect', verifyToken, async (req, res) => {
     const state = encodeURIComponent(req.user.id);
     const { verifier, challenge } = genPkce();
     pkceStore.set(req.user.id, verifier);
-    // Persist verifier to DB so callback works even after restart
     await User.findByIdAndUpdate(req.user.id, { $set: { 'fitbit.pkceVerifier': verifier, 'fitbit.pkceCreatedAt': new Date() } });
     const url = `${FITBIT_AUTH_URL}?response_type=code&client_id=${FITBIT_CLIENT_ID}&redirect_uri=${encodeURIComponent(FITBIT_REDIRECT_URI)}&scope=${scope}&prompt=consent&state=${state}&code_challenge=${challenge}&code_challenge_method=S256`;
     res.redirect(url);
@@ -60,7 +56,6 @@ router.get('/connect', verifyToken, async (req, res) => {
   }
 });
 
-// Therapist connects Fitbit on behalf of a patient (by email)
 router.get('/connect/for/:email', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success:false, error:'Forbidden: therapist only' });
@@ -80,7 +75,6 @@ router.get('/connect/for/:email', verifyToken, async (req, res) => {
   }
 });
 
-// OAuth callback
 router.get('/callback', async (req, res) => {
   try {
     const code = req.query.code; const stateUserId = req.query.state;
@@ -93,7 +87,6 @@ router.get('/callback', async (req, res) => {
     body.set('grant_type', 'authorization_code');
     body.set('redirect_uri', FITBIT_REDIRECT_URI);
     body.set('code', code);
-    // Retrieve code_verifier from memory or DB
     let verifier = pkceStore.get(stateUserId);
     if (!verifier) {
       try {
@@ -102,12 +95,9 @@ router.get('/callback', async (req, res) => {
       } catch (_) {}
     }
     if (verifier) body.set('code_verifier', verifier);
-
-    // Attempt with Basic header (server app)
     let r = await fetch(FITBIT_TOKEN_URL, { method:'POST', headers:{ 'Authorization':`Basic ${b64(`${FITBIT_CLIENT_ID}:${FITBIT_CLIENT_SECRET}`)}`, 'Content-Type':'application/x-www-form-urlencoded' }, body: body.toString() });
     let data = await r.json();
 
-    // Fallback: PKCE only (client/personal app)
     if (!r.ok && r.status === 401) {
       const body2 = new URLSearchParams(body.toString()); body2.delete('client_secret');
       r = await fetch(FITBIT_TOKEN_URL, { method:'POST', headers:{ 'Content-Type':'application/x-www-form-urlencoded' }, body: body2.toString() });
@@ -115,7 +105,6 @@ router.get('/callback', async (req, res) => {
     }
 
     if (!r.ok) {
-      // If the code was already used/expired, consider success if the user already has tokens
       const msg = JSON.stringify(data);
       if (r.status === 400 && /invalid_grant/i.test(msg) && /authorization code invalid|authorization code expired/i.test(msg)) {
         try {
@@ -292,7 +281,7 @@ async function lastAvailableHeartRateForUser(userId) {
       if (cached) {
         found = { bpm: cached.bpm, time: cached.time, date: null, source: 'cached', cachedAt: cached.recordedAt };
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {  }
   }
   if (found?.bpm != null) {
     try {
@@ -302,7 +291,6 @@ async function lastAvailableHeartRateForUser(userId) {
   return { success:true, found, timeZone: tz };
 }
 
-// Latest heart rate with graceful fallbacks (1sec -> 1min -> summary)
 router.get('/me/heart-rate/latest', verifyToken, async (req,res) => {
   try {
     const result = await latestHeartRateForUser(req.user.id);
@@ -313,7 +301,6 @@ router.get('/me/heart-rate/latest', verifyToken, async (req,res) => {
   }
 });
 
-// Find the most recent available BPM by scanning back up to 7 days (minute-level)
 router.get('/me/heart-rate/last-available', verifyToken, async (req,res) => {
   try {
     const result = await lastAvailableHeartRateForUser(req.user.id);
@@ -324,7 +311,6 @@ router.get('/me/heart-rate/last-available', verifyToken, async (req,res) => {
   }
 });
 
-// Therapist-read heart rate/status for an assigned patient (patient is the one who connects)
 router.get('/patients/:id/status', verifyToken, async (req,res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success:false, error:'Forbidden' });
@@ -367,7 +353,6 @@ router.get('/patients/:id/heart-rate/last-available', verifyToken, async (req,re
   }
 });
 
-// Connection/status introspection
 router.get('/me/status', verifyToken, async (req,res) => {
   try {
     const user = await User.findById(req.user.id).lean();
@@ -379,7 +364,6 @@ router.get('/me/status', verifyToken, async (req,res) => {
   }
 });
 
-// Raw heart data (1min) for debugging
 router.get('/me/heart-rate/raw', verifyToken, async (req,res) => {
   try {
     const access = await ensureAccessToken(req.user.id);
@@ -402,7 +386,6 @@ router.get('/debug', (req,res) => {
   } catch (e) { res.status(500).json({ success:false, error:e.message }); }
 });
 
-// Return safe Fitbit metadata for the current user (no tokens)
 router.get('/me/debug', verifyToken, async (req, res) => {
   try {
     const u = await User.findById(req.user.id).lean();
@@ -426,7 +409,6 @@ router.post('/me/force-refresh', verifyToken, async (req, res) => {
     if (!u?.fitbit?.refreshToken) return res.status(400).json({ success:false, message: 'No refresh token stored' });
     try {
       const access = await ensureAccessToken(req.user.id);
-      // If ensureAccessToken returns, refresh succeeded and access token is valid now
       return res.json({ success:true, refreshed: true, message: 'Refresh succeeded (access token updated).' });
     } catch (e) {
       console.error('force-refresh failed', e.message);
@@ -435,7 +417,6 @@ router.post('/me/force-refresh', verifyToken, async (req, res) => {
   } catch (e) { console.error('fitbit force-refresh error', e); res.status(500).json({ success:false, error:'Server error' }); }
 });
 
-// Convenience GET variant so developers can call from a browser with ?token=<JWT>
 router.get('/me/force-refresh', verifyToken, async (req, res) => {
   try {
     const u = await User.findById(req.user.id).lean();
@@ -450,7 +431,6 @@ router.get('/me/force-refresh', verifyToken, async (req, res) => {
   } catch (e) { console.error('fitbit force-refresh (GET) error', e); res.status(500).json({ success:false, error:'Server error' }); }
 });
 
-// Reset/disconnect current user's Fitbit connection
 router.post('/me/disconnect', verifyToken, async (req, res) => {
   try {
     await User.findByIdAndUpdate(req.user.id, { $unset: {
@@ -485,8 +465,7 @@ router.get('/reset-and-connect', verifyToken, async (req, res) => {
       'fitbit.pkceCreatedAt': 1
     }});
     pkceStore.delete(req.user.id);
-    // Reuse connect flow
-    const token = req.query.token; // verifyToken already accepted this token; reuse for redirect link
+    const token = req.query.token;
     const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
     res.redirect(`/api/fitbit/connect${suffix}`);
   } catch (e) {

@@ -222,12 +222,10 @@ export default function TherapistCalendar() {
                       if (d < today) return alert('Cannot schedule on a past date');
                     }
                     try {
-                      // find the selected item
                       const list = scheduleForm.existingKind === 'exercise' ? existingExercises : existingGames;
                       const item = list.find(x => String(x._id) === String(scheduleForm.existingId));
                       if (!item) return alert('Selected item not found');
                       const body = {
-                        // copy relevant fields
                         title: item.title,
                         description: item.description,
                         poseConfig: item.poseConfig || undefined,
@@ -326,7 +324,6 @@ export default function TherapistCalendar() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button onClick={async ()=>{
-                    // open inline edit prompt
                     const newTitle = window.prompt('Title', it.title);
                     if (newTitle === null) return;
                     const newDue = window.prompt('Due date (YYYY-MM-DD) or empty to clear', it.dueAt ? new Date(it.dueAt).toISOString().slice(0,10) : '');
