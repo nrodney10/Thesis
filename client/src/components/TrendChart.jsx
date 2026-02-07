@@ -147,37 +147,37 @@ export default function TrendChart({
       ) : (
         <div className="relative">
           <svg ref={svgRef} viewBox={`0 0 ${vw} ${vh}`} className="w-full" style={{ height: `${height}px` }} onMouseMove={handleMove} onMouseLeave={handleLeave}>
-            {/* Grid + axes */}
+            {}
             {yRange.ticks.map((t) => (
               <g key={t}>
                 <line x1={padL} x2={vw - padR} y1={scaleY(t)} y2={scaleY(t)} stroke="#E5E7EB" strokeWidth="0.9" />
                 <text x={padL - 12} y={scaleY(t) + 4} fontSize="13" fill="#6B7280" textAnchor="end">{t}</text>
               </g>
             ))}
-            {/* x ticks */}
+            {}
             {xTicks.map((t, idx)=> (
               <g key={t.key}>
                 <line x1={t.x} x2={t.x} y1={vh - padB} y2={vh - padB + 6} stroke="#9CA3AF" strokeWidth="1" />
                 <text x={t.x} y={vh - padB + 20} fontSize="11" fill="#9CA3AF" textAnchor="middle" transform={`translate(${t.x},${vh - padB + 20}) rotate(-35)`}>{t.label}</text>
               </g>
             ))}
-            {/* Area */}
+            {}
             <polygon points={`${polyPoints} ${scaleX(points[points.length-1].x)},${vh-padB} ${scaleX(points[0].x)},${vh-padB}`} fill={color} opacity="0.16" />
-            {/* Line: outer + inner for crisper look */}
+            {}
             <polyline points={polyPoints} fill="none" stroke={color} strokeWidth="3.6" strokeLinecap="round" strokeLinejoin="round" opacity={0.92} />
             <polyline points={polyPoints} fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" opacity={0.98} />
-            {/* Dots */}
+            {}
             {points.map((p,i)=> (
               <circle key={i} cx={xPositions[i]} cy={scaleY(p.y)} r="3.2" fill={color} stroke="#111827" strokeWidth="1.6" />
             ))}
-            {/* Hover */}
+            {}
             {hover && (
               <g>
                 <line x1={hover.svgX} x2={hover.svgX} y1={padT} y2={vh - padB} stroke="#9CA3AF" strokeDasharray="4 4" />
                 <circle cx={hover.svgX} cy={hover.svgY} r="5" fill={color} stroke="#ffffff" strokeWidth="1.6" />
               </g>
             )}
-            {/* Axis labels */}
+            {}
             <text x={10} y={padT} fill="#9CA3AF" fontSize="11">{yLabel}</text>
             <text x={vw/2} y={vh - 4} fill="#9CA3AF" fontSize="11" textAnchor="middle">Date</text>
           </svg>

@@ -214,7 +214,6 @@ router.post('/run-reminders', verifyToken, async (req, res) => {
   } catch (e) { console.error('run reminders error', e); res.status(500).json({ success:false }); }
 });
 
-// Update an exercise
 router.put('/:id', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });

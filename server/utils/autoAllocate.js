@@ -7,18 +7,16 @@ function scoreTemplates(templates, vulnTags = []) {
   const tags = vulnTags.map((t) => String(t).trim().toLowerCase()).filter(Boolean);
   return templates.map((tpl) => {
     const meta = tpl.metadata || {};
-    // Normalize vulnerability tags (handle arrays or comma-separated strings)
     const rawTags = meta.vulnerabilityTags || meta.tags || [];
     const list = Array.isArray(rawTags)
       ? rawTags
-      : String(rawTags).split(','); // if stored as a single comma-separated string
+      : String(rawTags).split(',');
     const tplTags = list
       .map((t) => String(t).trim().toLowerCase())
       .filter(Boolean);
     const overlap = tags.length ? tplTags.filter((t) => tags.includes(t)) : [];
     const cat = (tpl.category || '').toLowerCase();
     const catHit = tags.some((v) => cat && cat.includes(v)) ? 0.5 : 0;
-    // Additional heuristic matches: joints (e.g., 'knee'), and title/description keywords
     const joints = (tpl.poseConfig && tpl.poseConfig.joints) ? String(tpl.poseConfig.joints).toLowerCase() : '';
     const jointHit = joints && tags.includes(joints) ? 1 : 0;
     const txt = ((tpl.title || '') + ' ' + (tpl.description || '')).toLowerCase();
@@ -43,7 +41,6 @@ export async function autoAllocateForPatient(patientId, { limit = 3, dueAt = nul
   const scored = scoreTemplates(templates, vulnTags);
   let available = scored;
   if (!allowDuplicates) {
-    // Avoid duplicating existing assignments for this patient/therapist/template
     const existing = await Exercise.find({
       assignedTo: patient._id,
       createdBy: patient.therapistId,
@@ -87,7 +84,6 @@ export async function autoAllocateForPatient(patientId, { limit = 3, dueAt = nul
   return { success: true, count: created.length, exercises: created, matches };
 }
 
-// Allocate for all patients with vulnerability tags; intended for scheduled runs
 export async function autoAllocateForAllPatients({ limitPerPatient = 3, dueAt = null, dailyReminder = false } = {}) {
   const patients = await User.find({ role: 'patient', 'vulnerabilityProfile.tags.0': { $exists: true } });
   const results = [];

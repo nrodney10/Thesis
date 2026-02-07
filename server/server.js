@@ -33,7 +33,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Connect to MongoDB
 connectDB();
 
 app.get("/", (req, res) => {
@@ -53,14 +52,12 @@ app.use("/api/user", userRoutes);
 app.use("/api/indicators", indicatorsRoutes);
 app.use("/api/calendar", calendarRoutes);
 
-// Simple interval to send due / daily reminders every minute
 setInterval(async () => {
   try {
     const now = new Date();
     const nextDay = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    // Upcoming (24h) reminders
     const upcoming = await Exercise.find({ dueAt: { $gt: now, $lte: nextDay }, upcomingNotifiedAt: { $exists: false } }).limit(100);
     for (const ex of upcoming) {
       for (const uid of ex.assignedTo) {
@@ -94,7 +91,7 @@ setInterval(async () => {
   } catch (e) {
     console.error('Reminder interval error', e);
   }
-}, 60000); // 60s
+}, 60000);
 
 setInterval(async () => {
   try {
@@ -106,7 +103,7 @@ setInterval(async () => {
   } catch (e) {
     console.error('auto-allocate interval error', e);
   }
-}, 6 * 60 * 60 * 1000); // every 6 hours
+}, 6 * 60 * 60 * 1000);
 
 const PORT = process.env.PORT || 5000;
 if (process.env.NODE_ENV !== 'test') {

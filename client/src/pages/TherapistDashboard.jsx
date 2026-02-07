@@ -585,7 +585,7 @@ export default function TherapistDashboard() {
                     setPatientHeartRateFallback({ bpm: la.found.bpm, when: `${la.found.date || 'recent'} ${la.found.time || ''}`.trim() });
                     setPatientHeartRateSource((s) => s || la.found.source || 'last-available');
                   }
-                } catch (_) { /* ignore */ }
+                } catch (_) { }
               }
             }
           }

@@ -231,7 +231,7 @@ async function latestHeartRateForUser(userId) {
           rateLimited
         };
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) { }
   }
 
   const quotaExhausted = rawResponses.some(rr => rr.status === 429);

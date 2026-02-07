@@ -3,7 +3,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  // Read token/user synchronously from storage to avoid transient unauthenticated state
+  
   const initialToken = localStorage.getItem("token") || sessionStorage.getItem("token");
   const initialUser = (() => {
     try {
@@ -25,17 +25,16 @@ export function AuthProvider({ children }) {
       const j = await res.json();
       if (j.success) {
         setUser(j.user || null);
-        // persist in same storage as token
         if (localStorage.getItem('token') === token) localStorage.setItem('user', JSON.stringify(j.user));
         else sessionStorage.setItem('user', JSON.stringify(j.user));
         return j.user || null;
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) { }
     return null;
   }, [token]);
 
   useEffect(() => {
-    // Only fetch profile automatically if we don't have one yet
+ 
     if (!token) return;
     if (!user) refreshProfile();
   }, [token, user, refreshProfile]);
@@ -50,7 +49,6 @@ export function AuthProvider({ children }) {
     }
     setToken(newToken);
     setUser(newUser || null);
-    // Trigger immediate indicators refresh
     setTimeout(() => refreshIndicators(), 50);
   };
 
@@ -87,19 +85,17 @@ export function AuthProvider({ children }) {
           setMessagesUnread(j.messagesUnread);
         }
       }
-    } catch (e) { /* silent */ }
+    } catch (e) {  }
     finally { setIndicatorsLoading(false); }
   }, [token]);
 
-  // Poll indicators periodically
   useEffect(() => {
-    if (!token) return; // only when logged in
-    let interval = setInterval(() => refreshIndicators(), 30000); // 30s
+    if (!token) return; 
+    let interval = setInterval(() => refreshIndicators(), 30000);
     refreshIndicators();
     return () => clearInterval(interval);
   }, [token, refreshIndicators]);
 
-  // Expose optimistic update helpers
   const decrementNotifications = () => setNotificationsUnread(v => Math.max(0, v - 1));
   const decrementMessages = () => setMessagesUnread(v => Math.max(0, v - 1));
   const incrementMessages = () => setMessagesUnread(v => v + 1);
