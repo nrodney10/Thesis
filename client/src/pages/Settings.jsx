@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 
 export default function Settings() {
   const { authFetch, login } = useAuth();
-  const [profile, setProfile] = useState({ name: '', age: 0, email: '', vulnerabilityTags: '', vulnerabilityNotes: '' });
+  const [profile, setProfile] = useState({ name: '', age: 0, email: '', dateOfBirth: '', vulnerabilityTags: '', vulnerabilityNotes: '' });
   const [pw, setPw] = useState({ currentPassword: '', newPassword: '' });
   const [msg, setMsg] = useState('');
 
@@ -13,17 +13,29 @@ export default function Settings() {
       const j = await r.json();
       if (j.success && j.user) {
         const tags = j.user.vulnerabilityProfile?.tags?.join(', ') || '';
-        setProfile({ name: j.user.name, age: j.user.age, email: j.user.email, vulnerabilityTags: tags, vulnerabilityNotes: j.user.vulnerabilityProfile?.notes || '' });
+        const dob = j.user.dateOfBirth ? new Date(j.user.dateOfBirth).toISOString().slice(0, 10) : '';
+        setProfile({ name: j.user.name, age: j.user.age, email: j.user.email, dateOfBirth: dob, vulnerabilityTags: tags, vulnerabilityNotes: j.user.vulnerabilityProfile?.notes || '' });
       }
     };
     load();
   }, [authFetch]);
 
+  const calculateAge = (dob) => {
+    if (!dob) return '';
+    const d = new Date(dob);
+    if (Number.isNaN(d.getTime())) return '';
+    const today = new Date();
+    let age = today.getFullYear() - d.getFullYear();
+    const m = today.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age -= 1;
+    return age >= 0 ? age : '';
+  };
+  const derivedAge = profile.dateOfBirth ? calculateAge(profile.dateOfBirth) : profile.age;
+
   const saveProfile = async (e) => {
     e.preventDefault(); setMsg('');
     const body = {
       name: profile.name,
-      age: profile.age,
       email: profile.email,
       vulnerabilityProfile: {
         tags: profile.vulnerabilityTags.split(',').map(t=>t.trim()).filter(Boolean),
@@ -54,8 +66,13 @@ export default function Settings() {
             <input value={profile.name} onChange={e=>setProfile({...profile, name:e.target.value})} className="w-full bg-gray-700 p-2 rounded" />
           </div>
           <div>
-            <label className="block text-sm">Age</label>
-            <input type="number" value={profile.age} onChange={e=>setProfile({...profile, age:Number(e.target.value)||0})} className="w-full bg-gray-700 p-2 rounded" />
+            <label className="block text-sm">Date of birth</label>
+            <input type="date" value={profile.dateOfBirth || ''} className="w-full bg-gray-700 p-2 rounded text-gray-400" disabled />
+          </div>
+          <div>
+            <label className="block text-sm">Age (calculated)</label>
+            <input type="number" value={derivedAge} className="w-full bg-gray-700 p-2 rounded text-gray-400" disabled />
+            <div className="text-xs text-gray-500 mt-1">Age is calculated from your date of birth and cannot be changed.</div>
           </div>
           <div>
             <label className="block text-sm">Email</label>

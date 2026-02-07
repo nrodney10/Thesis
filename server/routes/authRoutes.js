@@ -7,10 +7,25 @@ import { notifyUsers } from "../utils/notify.js";
 
 const router = express.Router();
 
+const calculateAge = (dob) => {
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const m = today.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age -= 1;
+  return age;
+};
+
 // REGISTER
 router.post("/register", async (req, res) => {
   try {
-    const { name, age, email, password, role } = req.body;
+    const { name, email, password, role, dateOfBirth } = req.body;
+    if (!dateOfBirth) return res.status(400).json({ message: "Date of birth is required" });
+    const dob = new Date(dateOfBirth);
+    if (Number.isNaN(dob.getTime())) return res.status(400).json({ message: "Invalid date of birth" });
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    if (dob > today) return res.status(400).json({ message: "Date of birth cannot be in the future" });
+    const age = calculateAge(dob);
+    if (age < 0) return res.status(400).json({ message: "Invalid date of birth" });
 
     // Check for existing email
     const existingUser = await User.findOne({ email });
@@ -25,6 +40,7 @@ router.post("/register", async (req, res) => {
     const newUser = new User({
       name,
       age,
+      dateOfBirth: dob,
       email,
       password: hashedPassword,
       role,

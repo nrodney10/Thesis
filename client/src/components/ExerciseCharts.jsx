@@ -34,24 +34,28 @@ export default function ExerciseCharts({ results = [], compact = false, showDate
   const tposeSessions = useMemo(() => physical.filter(r => detectPoseType(r) === 'tpose'), [physical]);
   const squatSessions = useMemo(() => physical.filter(r => detectPoseType(r) === 'squat'), [physical]);
 
-  const tposeCountForDate = useMemo(() => {
-    if (!selectedDate) return null;
-    return tposeSessions.filter((r) => {
-      if (!r.createdAt) return false;
-      const d = new Date(r.createdAt);
-      if (Number.isNaN(d.getTime())) return false;
-      return dateKey(d) === selectedDate;
-    }).length;
+  const tposeForDate = useMemo(() => {
+    if (!selectedDate) return [];
+    return tposeSessions
+      .filter((r) => {
+        if (!r.createdAt) return false;
+        const d = new Date(r.createdAt);
+        if (Number.isNaN(d.getTime())) return false;
+        return dateKey(d) === selectedDate;
+      })
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
   }, [selectedDate, tposeSessions]);
 
-  const squatCountForDate = useMemo(() => {
-    if (!selectedDate) return null;
-    return squatSessions.filter((r) => {
-      if (!r.createdAt) return false;
-      const d = new Date(r.createdAt);
-      if (Number.isNaN(d.getTime())) return false;
-      return dateKey(d) === selectedDate;
-    }).length;
+  const squatForDate = useMemo(() => {
+    if (!selectedDate) return [];
+    return squatSessions
+      .filter((r) => {
+        if (!r.createdAt) return false;
+        const d = new Date(r.createdAt);
+        if (Number.isNaN(d.getTime())) return false;
+        return dateKey(d) === selectedDate;
+      })
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
   }, [selectedDate, squatSessions]);
 
   const tposeTime = useMemo(() => tposeSessions.map(r => ({
@@ -71,6 +75,30 @@ export default function ExerciseCharts({ results = [], compact = false, showDate
     correct: r.metadata?.poseMetrics?.correctReps ?? 0,
     incorrect: r.metadata?.poseMetrics?.incorrectReps ?? 0
   })), [squatSessions]);
+
+  const tposeTooltipLines = (session) => {
+    const secs = Math.round(((session?.metadata?.poseMetrics?.timeInTargetMs || 0) / 1000) * 10) / 10;
+    const out = session?.metadata?.poseMetrics?.outOfRangeCount ?? 0;
+    const when = session?.createdAt ? new Date(session.createdAt).toLocaleString() : null;
+    return [
+      `Time in pose: ${secs}s`,
+      `Out of range: ${out}`,
+      when
+    ].filter(Boolean);
+  };
+
+  const squatTooltipLines = (session) => {
+    const correct = session?.metadata?.poseMetrics?.correctReps ?? 0;
+    const incorrect = session?.metadata?.poseMetrics?.incorrectReps ?? 0;
+    const total = correct + incorrect;
+    const when = session?.createdAt ? new Date(session.createdAt).toLocaleString() : null;
+    return [
+      `${total} total`,
+      `Correct: ${correct}`,
+      `Incorrect: ${incorrect}`,
+      when
+    ].filter(Boolean);
+  };
 
   const chartHeight = compact ? 220 : 280;
 
@@ -102,7 +130,7 @@ export default function ExerciseCharts({ results = [], compact = false, showDate
       )}
       <div className="bg-gray-800 rounded p-4 shadow">
         <div className="text-sm text-gray-200 font-semibold mb-2">T-Pose Progress</div>
-        {selectedDate && tposeCountForDate === 0 && (
+        {selectedDate && tposeForDate.length === 0 && (
           <div className="text-xs text-gray-400 mb-2">No T-pose sessions on {selectedDate}.</div>
         )}
         <div className="space-y-3">
@@ -139,11 +167,25 @@ export default function ExerciseCharts({ results = [], compact = false, showDate
             ].filter(Boolean))}
           />
         </div>
+        {selectedDate && tposeForDate.length > 0 && (
+          <div className="mt-3">
+            <div className="text-xs text-gray-400 mb-2">Sessions on {selectedDate}</div>
+            <div className="space-y-2">
+              {tposeForDate.map((session, idx) => (
+                <div key={session._id || session.createdAt || idx} className="bg-white border border-gray-200 rounded px-3 py-2 text-black">
+                  {tposeTooltipLines(session).map((line, lineIdx) => (
+                    <div key={lineIdx} className={lineIdx === 0 ? "font-semibold" : "text-[11px] text-gray-700"}>{line}</div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="bg-gray-800 rounded p-4 shadow">
         <div className="text-sm text-gray-200 font-semibold mb-2">Squat Progress</div>
-        {selectedDate && squatCountForDate === 0 && (
+        {selectedDate && squatForDate.length === 0 && (
           <div className="text-xs text-gray-400 mb-2">No squat sessions on {selectedDate}.</div>
         )}
         <StackedBarChart
@@ -153,6 +195,20 @@ export default function ExerciseCharts({ results = [], compact = false, showDate
           yLabel="Squats"
           showHeader={true}
         />
+        {selectedDate && squatForDate.length > 0 && (
+          <div className="mt-3">
+            <div className="text-xs text-gray-400 mb-2">Sessions on {selectedDate}</div>
+            <div className="space-y-2">
+              {squatForDate.map((session, idx) => (
+                <div key={session._id || session.createdAt || idx} className="bg-white border border-gray-200 rounded px-3 py-2 text-black">
+                  {squatTooltipLines(session).map((line, lineIdx) => (
+                    <div key={lineIdx} className={lineIdx === 0 ? "font-semibold" : "text-[11px] text-gray-700"}>{line}</div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

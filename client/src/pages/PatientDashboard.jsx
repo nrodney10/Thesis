@@ -5,6 +5,36 @@ import TrendChart from "../components/TrendChart";
 import ExerciseCharts from "../components/ExerciseCharts";
 import { Link } from "react-router-dom";
 
+const getScoreValue = (raw) => {
+  if (!raw) return 0;
+  if (typeof raw.score === 'number') return raw.score;
+  if (typeof raw.value === 'number') return raw.value;
+  const n = Number(raw.score);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const labelForGame = (gameKey) => {
+  const key = String(gameKey || '').toLowerCase();
+  if (!key) return null;
+  if (key === 'memory') return 'Memory Match';
+  if (key === 'stroop') return 'Stroop Test';
+  return key;
+};
+
+const cognitiveTooltipLines = (raw, value) => ([
+  `Score: ${Math.round(((Number.isFinite(value) ? value : getScoreValue(raw)) || 0) * 10) / 10}`,
+  (() => {
+    const key = raw?.metadata?.gameKey || raw?.gameKey || '';
+    const label = labelForGame(key);
+    return label ? `Game: ${label}` : null;
+  })(),
+  raw?.metadata?.avgRTms != null ? `Avg RT: ${raw.metadata.avgRTms} ms` : null,
+  raw?.metadata?.moves != null ? `Moves: ${raw.metadata.moves}` : null,
+  raw?.metadata?.timeSeconds != null ? `Time: ${raw.metadata.timeSeconds}s` : null,
+  raw?.metadata?.trials != null ? `Trials: ${raw.metadata.trials}` : null,
+  raw?.createdAt ? new Date(raw.createdAt).toLocaleString() : null
+].filter(Boolean));
+
 export default function PatientDashboard() {
   const { authFetch, user, logout, notificationsUnread, messagesUnread, refreshProfile } = useAuth();
   const [results, setResults] = useState([]);
@@ -196,28 +226,26 @@ export default function PatientDashboard() {
                         yLabel="Score"
                         showHeader={true}
                         showFullLabel={true}
-                        tooltipLines={(raw, value) => ([
-                          `Score: ${value}`,
-                          (() => {
-                            const key = raw?.metadata?.gameKey || raw?.gameKey || '';
-                            if (!key) return null;
-                            const label = key === 'memory' ? 'Memory Match' : key === 'stroop' ? 'Stroop Test' : key;
-                            return `Game: ${label}`;
-                          })(),
-                          raw?.metadata?.avgRTms != null ? `Avg RT: ${raw.metadata.avgRTms} ms` : null,
-                          raw?.metadata?.moves != null ? `Moves: ${raw.metadata.moves}` : null,
-                          raw?.metadata?.timeSeconds != null ? `Time: ${raw.metadata.timeSeconds}s` : null,
-                          raw?.metadata?.trials != null ? `Trials: ${raw.metadata.trials}` : null,
-                          raw?.createdAt ? new Date(raw.createdAt).toLocaleString() : null
-                        ].filter(Boolean))}
+                        tooltipLines={(raw, value) => cognitiveTooltipLines(raw, value)}
                       />
-                      <div className="p-3 text-xs text-gray-300">
+                      <div className="p-3 text-xs text-gray-900">
                         {(() => {
                           const day = selectedDateCognitive;
-                          const filtered = results.filter(r => r.createdAt && new Date(r.createdAt).toISOString().slice(0,10) === day && (r.type === 'game' || r.type === 'cognitive'));
-                          if (filtered.length === 0) return (<div>No cognitive games on {day}.</div>);
-                          const avg = Math.round((filtered.reduce((s, r) => s + (r.score || 0), 0) / filtered.length) || 0);
-                          return (<div>Items: {filtered.length} • Avg: {avg}</div>);
+                          const filtered = results
+                            .filter(r => r.createdAt && new Date(r.createdAt).toISOString().slice(0,10) === day && (r.type === 'game' || r.type === 'cognitive'))
+                            .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+                          if (filtered.length === 0) return (<div className="text-gray-700">No cognitive games on {day}.</div>);
+                          return (
+                            <div className="space-y-2">
+                              {filtered.map((item, idx) => (
+                                <div key={item._id || item.createdAt || idx} className="bg-white border border-gray-200 rounded px-3 py-2 text-black">
+                                  {cognitiveTooltipLines(item).map((line, lineIdx) => (
+                                    <div key={lineIdx} className={lineIdx === 0 ? "font-semibold" : "text-[11px] text-gray-700"}>{line}</div>
+                                  ))}
+                                </div>
+                              ))}
+                            </div>
+                          );
                         })()}
                       </div>
                     </div>

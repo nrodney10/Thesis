@@ -38,6 +38,26 @@ const labelForGame = (gameKey) => {
   if (key === 'stroop') return 'Stroop Test';
   return key || null;
 };
+const getScoreValue = (raw) => {
+  if (!raw) return 0;
+  if (typeof raw.score === 'number') return raw.score;
+  if (typeof raw.value === 'number') return raw.value;
+  const n = Number(raw.score);
+  return Number.isFinite(n) ? n : 0;
+};
+const cognitiveTooltipLines = (raw, value) => ([
+  `Score: ${Math.round(((Number.isFinite(value) ? value : getScoreValue(raw)) || 0) * 10) / 10}`,
+  (() => {
+    const key = raw?.metadata?.gameKey || raw?.gameKey || '';
+    const label = labelForGame(key);
+    return label ? `Game: ${label}` : null;
+  })(),
+  raw?.metadata?.avgRTms != null ? `Avg RT: ${raw.metadata.avgRTms} ms` : null,
+  raw?.metadata?.moves != null ? `Moves: ${raw.metadata.moves}` : null,
+  raw?.metadata?.timeSeconds != null ? `Time: ${raw.metadata.timeSeconds}s` : null,
+  raw?.metadata?.trials != null ? `Trials: ${raw.metadata.trials}` : null,
+  raw?.createdAt ? new Date(raw.createdAt).toLocaleString() : null
+].filter(Boolean));
 const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
 
 export default function TherapistDashboard() {
@@ -690,11 +710,22 @@ export default function TherapistDashboard() {
                         <input type="date" value={selectedDateCognitive} onChange={(e)=>setSelectedDateCognitive(e.target.value)} className="bg-gray-700 text-sm text-gray-100 px-2 py-1 rounded" />
                       </div>
                     </div>
-                    <div className="text-xs text-gray-300 mb-2">
+                    <div className="text-xs text-gray-900 mb-2">
                       {(() => {
                         const list = cognitiveForDate(selectedDateCognitive);
-                        if (!list.length) return (<div className="text-xs text-gray-400">No cognitive games on {selectedDateCognitive}.</div>);
-                        return (<div>Items: {list.length} • Avg: {Math.round((list.reduce((s,r)=>s+(r.score||0),0)/list.length)||0)}</div>);
+                        if (!list.length) return (<div className="text-xs text-gray-700">No cognitive games on {selectedDateCognitive}.</div>);
+                        const sorted = [...list].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+                        return (
+                          <div className="space-y-2">
+                            {sorted.map((item, idx) => (
+                              <div key={item._id || item.createdAt || idx} className="bg-white border border-gray-200 rounded px-3 py-2 text-black">
+                                {cognitiveTooltipLines(item).map((line, lineIdx) => (
+                                  <div key={lineIdx} className={lineIdx === 0 ? "font-semibold" : "text-[11px] text-gray-700"}>{line}</div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        );
                       })()}
                     </div>
                     {loadingResults ? (
@@ -710,20 +741,7 @@ export default function TherapistDashboard() {
                         yLabel="Score"
                         showHeader={true}
                         showFullLabel={true}
-                        tooltipLines={(raw, value) => ([
-                          `Score: ${value}`,
-                          (() => {
-                            const key = raw?.metadata?.gameKey || raw?.gameKey || '';
-                            if (!key) return null;
-                            const label = key === 'memory' ? 'Memory Match' : key === 'stroop' ? 'Stroop Test' : key;
-                            return `Game: ${label}`;
-                          })(),
-                          raw?.metadata?.avgRTms != null ? `Avg RT: ${raw.metadata.avgRTms} ms` : null,
-                          raw?.metadata?.moves != null ? `Moves: ${raw.metadata.moves}` : null,
-                          raw?.metadata?.timeSeconds != null ? `Time: ${raw.metadata.timeSeconds}s` : null,
-                          raw?.metadata?.trials != null ? `Trials: ${raw.metadata.trials}` : null,
-                          raw?.createdAt ? new Date(raw.createdAt).toLocaleString() : null
-                        ].filter(Boolean))}
+                        tooltipLines={(raw, value) => cognitiveTooltipLines(raw, value)}
                       />
                     )}
                   </div>

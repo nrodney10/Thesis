@@ -22,13 +22,12 @@ router.get('/me', verifyToken, async (req, res) => {
   res.json({ success:true, user: userObj });
 });
 
-// Update profile (name, age, email, vulnerabilityProfile)
+// Update profile (name, email, vulnerabilityProfile)
 router.put('/me', verifyToken, async (req, res) => {
   try {
-    const { name, age, email, vulnerabilityProfile } = req.body;
+    const { name, email, vulnerabilityProfile } = req.body;
     const updates = {};
     if (name) updates.name = name;
-    if (typeof age !== 'undefined') updates.age = age;
     if (email) updates.email = email;
     if (vulnerabilityProfile && typeof vulnerabilityProfile === 'object') {
       const tags = Array.isArray(vulnerabilityProfile.tags)

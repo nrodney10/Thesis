@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 export default function Register() {
   const [form, setForm] = useState({
     name: "",
-    age: "",
+    dateOfBirth: "",
     email: "",
     password: "",
     role: "patient",
@@ -20,15 +20,35 @@ export default function Register() {
   const navigate = useNavigate();
   const { login } = useAuth();
 
+  const calculateAge = (dob) => {
+    if (!dob) return "";
+    const d = new Date(dob);
+    if (Number.isNaN(d.getTime())) return "";
+    const today = new Date();
+    let age = today.getFullYear() - d.getFullYear();
+    const m = today.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age -= 1;
+    return age >= 0 ? age : "";
+  };
+
+  const computedAge = calculateAge(form.dateOfBirth);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSuccess("");
     try {
+      const payload = {
+        name: form.name,
+        email: form.email,
+        password: form.password,
+        role: form.role,
+        dateOfBirth: form.dateOfBirth
+      };
       const res = await fetch("http://localhost:5000/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -84,15 +104,29 @@ export default function Register() {
           required
         />
 
-        <input
-          type="number"
-          name="age"
-          placeholder="Age"
-          value={form.age}
-          onChange={handleChange}
-          className="w-full bg-transparent border-b border-gray-600 px-4 py-2 mb-4 focus:outline-none text-white"
-          required
-        />
+        <div className="mb-4">
+          <label className="block text-sm text-gray-300 mb-1">Date of birth</label>
+          <input
+            type="date"
+            name="dateOfBirth"
+            value={form.dateOfBirth}
+            onChange={handleChange}
+            max={new Date().toISOString().slice(0, 10)}
+            className="w-full bg-transparent border-b border-gray-600 px-4 py-2 focus:outline-none text-white"
+            required
+          />
+        </div>
+        <div className="mb-4">
+          <label className="block text-sm text-gray-300 mb-1">Age (calculated)</label>
+          <input
+            type="number"
+            value={computedAge}
+            readOnly
+            className="w-full bg-transparent border-b border-gray-700 px-4 py-2 text-gray-400"
+            placeholder="Age will appear after selecting DOB"
+          />
+          <div className="text-xs text-gray-500 mt-1">Age is calculated from your date of birth and cannot be changed later.</div>
+        </div>
 
         <input
           type="email"
