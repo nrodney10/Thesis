@@ -108,14 +108,14 @@ router.put('/:id', verifyToken, async (req, res) => {
 router.post('/auto-allocate', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'therapist') return res.status(403).json({ success: false, error: 'Forbidden' });
-    const { patientId, vulnerabilities = null, limit = 3, dueAt, dailyReminder } = req.body || {};
+    const { patientId, vulnerabilities = null, limit = 3, dueAt, dailyReminder, allowDuplicates = false } = req.body || {};
     if (!patientId) return res.status(400).json({ success: false, error: 'patientId required' });
     const patient = await User.findById(patientId);
     if (!patient || patient.role !== 'patient') return res.status(404).json({ success: false, error: 'Patient not found' });
     if (String(patient.therapistId) !== String(req.user.id)) return res.status(403).json({ success:false, error:'Forbidden' });
 
     // delegate to utility which accepts optional vulnerabilities override and returns matches
-    const r = await autoAllocateForPatient(patientId, { limit, dueAt, dailyReminder, vulnerabilities });
+    const r = await autoAllocateForPatient(patientId, { limit, dueAt, dailyReminder, vulnerabilities, allowDuplicates });
     if (!r.success) return res.status(400).json({ success: false, error: r.reason || 'No matches' });
     // response already contains exercises and matches
     return res.json(r);
@@ -133,8 +133,8 @@ router.post('/auto-allocate/for-patient/:id', verifyToken, async (req, res) => {
     const patient = await User.findById(id);
     if (!patient || patient.role !== 'patient') return res.status(404).json({ success:false, error:'Patient not found' });
     if (String(patient.therapistId) !== String(req.user.id)) return res.status(403).json({ success:false, error:'Forbidden' });
-    const { limit = 3, dueAt, dailyReminder } = req.body || {};
-    const r = await autoAllocateForPatient(id, { limit, dueAt, dailyReminder });
+    const { limit = 3, dueAt, dailyReminder, allowDuplicates = false } = req.body || {};
+    const r = await autoAllocateForPatient(id, { limit, dueAt, dailyReminder, allowDuplicates });
     if (!r.success) return res.status(400).json({ success: false, error: r.reason || 'No matches' });
     res.json(r);
   } catch (e) {

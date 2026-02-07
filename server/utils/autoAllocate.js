@@ -28,7 +28,7 @@ function scoreTemplates(templates, vulnTags = []) {
   }).sort((a, b) => b.score - a.score);
 }
 
-export async function autoAllocateForPatient(patientId, { limit = 3, dueAt = null, dailyReminder = false, vulnerabilities = null } = {}) {
+export async function autoAllocateForPatient(patientId, { limit = 3, dueAt = null, dailyReminder = false, vulnerabilities = null, allowDuplicates = false } = {}) {
   const patient = await User.findById(patientId);
   if (!patient || patient.role !== 'patient') return { success: false, reason: 'patient_not_found' };
   if (!patient.therapistId) return { success: false, reason: 'no_therapist' };
@@ -40,18 +40,18 @@ export async function autoAllocateForPatient(patientId, { limit = 3, dueAt = nul
   const templates = await ExerciseTemplate.find({ createdBy: patient.therapistId });
   if (!templates.length) return { success: false, reason: 'no_templates' };
 
-  // Previously we skipped templates already auto-assigned; to keep allocations working even if prior runs exist,
-  // we now consider all templates (duplicate assignments are allowed).
   const scored = scoreTemplates(templates, vulnTags);
-  // Avoid duplicating existing assignments for this patient/therapist/template
-  const existing = await Exercise.find({
-    assignedTo: patient._id,
-    createdBy: patient.therapistId,
-    templateId: { $ne: null }
-  }).select('templateId');
-  const existingTplIds = new Set(existing.map((e) => String(e.templateId)));
-
-  const available = scored.filter((s) => !existingTplIds.has(String(s.tpl._id)));
+  let available = scored;
+  if (!allowDuplicates) {
+    // Avoid duplicating existing assignments for this patient/therapist/template
+    const existing = await Exercise.find({
+      assignedTo: patient._id,
+      createdBy: patient.therapistId,
+      templateId: { $ne: null }
+    }).select('templateId');
+    const existingTplIds = new Set(existing.map((e) => String(e.templateId)));
+    available = scored.filter((s) => !existingTplIds.has(String(s.tpl._id)));
+  }
   const chosen = available.filter((s) => s.score > 0).slice(0, Math.max(1, Math.min(10, Number(limit) || 3)));
   if (!chosen.length) {
     if (available.length === 0) return { success: true, count: 0, reason: 'already_assigned' };

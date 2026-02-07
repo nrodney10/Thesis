@@ -8,7 +8,7 @@ export default function Games() {
   const { push } = useToast();
   const [patients, setPatients] = useState([]);
   const [selected, setSelected] = useState(new Set());
-  const [form, setForm] = useState({ game: 'memory', note: '', dueAt: '' });
+  const [form, setForm] = useState({ game: 'memory', note: '', dueAt: '', scheduleType: 'scheduled' });
   const [status, setStatus] = useState('');
   const [assignments, setAssignments] = useState([]);
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
@@ -186,10 +186,13 @@ export default function Games() {
 
   const sendAssignment = async () => {
     if (!selected.size) { push('Select at least one patient', 'error'); return; }
-    if (!form.dueAt) { push('Pick a schedule date for this game', 'error'); return; }
-    const dateOnly = new Date(form.dueAt);
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    if (dateOnly < today) { push('Scheduled date cannot be in the past', 'error'); return; }
+    const isScheduled = form.scheduleType === 'scheduled';
+    if (isScheduled && !form.dueAt) { push('Pick a schedule date for this game', 'error'); return; }
+    if (isScheduled) {
+      const dateOnly = new Date(form.dueAt);
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      if (dateOnly < today) { push('Scheduled date cannot be in the past', 'error'); return; }
+    }
     setStatus('Sending...');
     try {
       const title = form.game === 'memory' ? 'Memory Match' : 'Stroop Test';
@@ -199,8 +202,8 @@ export default function Games() {
         description: body,
         assignedTo: Array.from(selected),
         metadata: { assignmentType: 'game', gameKey: form.game },
-        dueAt: form.dueAt
       };
+      if (isScheduled && form.dueAt) payload.dueAt = form.dueAt;
       const r = await authFetch('http://localhost:5000/api/exercises', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
@@ -271,7 +274,7 @@ export default function Games() {
             <h1 className="text-2xl font-bold">Assign Games</h1>
             <p className="text-gray-300">Pick a cognitive game and notify patients to complete it.</p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <label className="text-sm">
               Game
               <select value={form.game} onChange={e=>setForm({ ...form, game: e.target.value })} className="w-full bg-gray-700 p-2 rounded mt-1">
@@ -284,15 +287,28 @@ export default function Games() {
               <input value={form.note} onChange={e=>setForm({ ...form, note: e.target.value })} className="w-full bg-gray-700 p-2 rounded mt-1" placeholder="Instructions or due info" />
             </label>
             <label className="text-sm">
-              Schedule date
-              <input
-                type="date"
-                value={form.dueAt}
-                min={new Date().toISOString().slice(0,10)}
-                onChange={e=>setForm({ ...form, dueAt: e.target.value })}
+              Timing
+              <select
+                value={form.scheduleType}
+                onChange={e=>setForm({ ...form, scheduleType: e.target.value, dueAt: e.target.value === 'practice' ? '' : form.dueAt })}
                 className="w-full bg-gray-700 p-2 rounded mt-1"
-              />
+              >
+                <option value="practice">Practice</option>
+                <option value="scheduled">Scheduled</option>
+              </select>
             </label>
+            {form.scheduleType === 'scheduled' && (
+              <label className="text-sm">
+                Schedule date
+                <input
+                  type="date"
+                  value={form.dueAt}
+                  min={new Date().toISOString().slice(0,10)}
+                  onChange={e=>setForm({ ...form, dueAt: e.target.value })}
+                  className="w-full bg-gray-700 p-2 rounded mt-1"
+                />
+              </label>
+            )}
           </div>
           <div>
             <div className="text-sm text-gray-300 mb-1">Select recipients</div>
@@ -310,7 +326,7 @@ export default function Games() {
             <button onClick={sendAssignment} className="bg-indigo-600 px-4 py-2 rounded text-white disabled:opacity-50" disabled={!patients.length}>Assign game</button>
             {status && <div className="text-xs text-gray-300 self-center">{status}</div>}
           </div>
-          <div className="text-sm text-gray-400">Games are now scheduled: pick a date and patients will see them under Scheduled on their Games page.</div>
+          <div className="text-sm text-gray-400">Choose Practice for immediate availability, or Scheduled to lock the game until its date.</div>
 
           <div className="mt-8 border-t border-gray-700 pt-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
@@ -337,6 +353,9 @@ export default function Games() {
                         <div>
                           <div className="font-semibold">{a.title}</div>
                           <div className="text-xs text-gray-400">Game: {a.metadata?.gameKey || 'game'}</div>
+                          <div className="text-xs text-gray-500">
+                            {a.dueAt ? `Scheduled: ${new Date(a.dueAt).toLocaleString()}` : 'Practice (no date)'}
+                          </div>
                         </div>
                         <label className="flex items-center gap-2 text-sm">
                           <input type="checkbox" checked={selectedAssignmentIds.has(a._id)} onChange={()=>toggleAssignmentSelection(a._id)} />

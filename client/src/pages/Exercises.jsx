@@ -12,8 +12,8 @@ export default function Exercises() {
   const [patientsLoading, setPatientsLoading] = useState(false);
   const [templates, setTemplates] = useState([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
-  const [assign, setAssign] = useState({ templateId: '', assignedTo: new Set(), overrides: { title: '', description: '', poseConfig: {}, metadata: {} }, dueAt: '', dailyReminder: false });
-  const [autoAlloc, setAutoAlloc] = useState({ patientId: '', status: '', vulnerabilities: '' });
+  const [assign, setAssign] = useState({ templateId: '', assignedTo: new Set(), overrides: { title: '', description: '', poseConfig: {}, metadata: {} }, dueAt: '', dailyReminder: false, scheduleType: 'scheduled' });
+  const [autoAlloc, setAutoAlloc] = useState({ patientId: '', status: '', vulnerabilities: '', allowDuplicates: false, scheduleType: 'scheduled', dueAt: '' });
   const [lastMatches, setLastMatches] = useState([]);
   const [now, setNow] = useState(() => new Date());
   const userId = user?.id || user?._id;
@@ -116,23 +116,27 @@ export default function Exercises() {
 
   const instantiate = async () => {
     if (!assign.templateId) return push('Pick a template', 'error');
-    if (!assign.dueAt) return push('Pick a schedule date', 'error');
-    const d = new Date(assign.dueAt);
-    const today = new Date(); today.setHours(0,0,0,0);
-    if (d < today) return push('Cannot schedule on a past date', 'error');
+    const isScheduled = assign.scheduleType === 'scheduled';
+    if (isScheduled && !assign.dueAt) return push('Pick a schedule date', 'error');
+    if (isScheduled) {
+      const d = new Date(assign.dueAt);
+      const today = new Date(); today.setHours(0,0,0,0);
+      if (d < today) return push('Cannot schedule on a past date', 'error');
+    }
     try {
       const cleanedOverrides = { ...assign.overrides };
       if (cleanedOverrides.poseConfig) cleanedOverrides.poseConfig = sanitizePoseConfig(cleanedOverrides.poseConfig);
       if (cleanedOverrides.metadata && typeof cleanedOverrides.metadata.vulnerabilityTags === 'string') {
         cleanedOverrides.metadata.vulnerabilityTags = cleanedOverrides.metadata.vulnerabilityTags.split(',').map(s=>s.trim()).filter(Boolean);
       }
-      const body = { assignedTo: Array.from(assign.assignedTo), overrides: cleanedOverrides, dueAt: assign.dueAt };
+      const body = { assignedTo: Array.from(assign.assignedTo), overrides: cleanedOverrides };
+      if (isScheduled && assign.dueAt) body.dueAt = assign.dueAt;
       if (assign.dailyReminder) body.dailyReminder = assign.dailyReminder;
       const res = await authFetch(`http://localhost:5000/api/templates/${assign.templateId}/instantiate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json();
       if (data.success) {
         push('Assignment created', 'success');
-        setAssign({ templateId: '', assignedTo: new Set(), overrides: { title: '', description: '', poseConfig: {}, metadata: {} }, dueAt: '', dailyReminder: false });
+        setAssign({ templateId: '', assignedTo: new Set(), overrides: { title: '', description: '', poseConfig: {}, metadata: {} }, dueAt: '', dailyReminder: false, scheduleType: assign.scheduleType });
         fetchExercises();
       } else {
         console.error('Instantiate error', data);
@@ -142,34 +146,66 @@ export default function Exercises() {
     } catch (e) { console.error(e); push('Error creating from template', 'error'); }
   };
 
+  const formatAutoAllocReason = (reason) => {
+    if (!reason) return 'No matches';
+    const map = {
+      already_assigned: 'All matching templates are already assigned.',
+      no_matches: 'No templates matched those tags.',
+      no_vulnerabilities: 'Patient has no vulnerability tags.',
+      no_templates: 'No templates available.'
+    };
+    return map[reason] || reason;
+  };
+
   const runAutoAllocate = async () => {
     if (!autoAlloc.patientId) return push('Pick a patient to auto-allocate', 'error');
     setAutoAlloc((s)=>({ ...s, status:'Running...' }));
     try {
+      const isScheduled = autoAlloc.scheduleType === 'scheduled';
+      if (isScheduled && !autoAlloc.dueAt) {
+        setAutoAlloc((s)=>({ ...s, status: 'Pick a due date' }));
+        return push('Pick a due date for scheduled auto-allocate', 'error');
+      }
+      if (isScheduled && autoAlloc.dueAt) {
+        const d = new Date(autoAlloc.dueAt);
+        const today = new Date(); today.setHours(0,0,0,0);
+        if (d < today) {
+          setAutoAlloc((s)=>({ ...s, status: 'Cannot schedule in the past' }));
+          return push('Cannot schedule on a past date', 'error');
+        }
+      }
       const hasTags = autoAlloc.vulnerabilities && String(autoAlloc.vulnerabilities).trim().length > 0;
+      const allowDuplicates = !!autoAlloc.allowDuplicates;
+      const payloadSchedule = isScheduled && autoAlloc.dueAt ? { dueAt: autoAlloc.dueAt } : {};
       let res;
       if (hasTags) {
         const vulnerabilities = autoAlloc.vulnerabilities.split(',').map(s=>s.trim()).filter(Boolean);
         res = await authFetch(`http://localhost:5000/api/templates/auto-allocate`, {
           method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ patientId: autoAlloc.patientId, vulnerabilities })
+          body: JSON.stringify({ patientId: autoAlloc.patientId, vulnerabilities, allowDuplicates, ...payloadSchedule })
         });
       } else {
         res = await authFetch(`http://localhost:5000/api/templates/auto-allocate/for-patient/${autoAlloc.patientId}`, {
-          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({})
+          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ allowDuplicates, ...payloadSchedule })
         });
       }
       const data = await res.json();
-      if (data.success) {
+      if (data.success && (data.count || 0) > 0) {
         push(`Auto-allocated ${data.count || 0} exercise(s)`, 'success');
         setAutoAlloc((s)=>({ ...s, status:`Created ${data.count || 0} exercise(s)` }));
         setLastMatches(data.matches || []);
         fetchExercises();
-      } else {
-        const msg = data.error || data.reason || 'No matches';
-        push(`No exercises auto-allocated: ${msg}`, 'error');
+      } else if (data.success) {
+        const msg = formatAutoAllocReason(data.reason);
+        push(`No exercises auto-allocated: ${msg}`, 'info');
         setAutoAlloc((s)=>({ ...s, status:`No matches: ${msg}` }));
+        setLastMatches([]);
+      } else {
+        const msg = formatAutoAllocReason(data.error || data.reason);
+        push(`Auto-allocate failed: ${msg}`, 'error');
+        setAutoAlloc((s)=>({ ...s, status:`Error: ${msg}` }));
+        setLastMatches([]);
       }
     } catch (e) {
       console.error(e);
@@ -280,16 +316,18 @@ export default function Exercises() {
                       <button onClick={()=>{ setShowAddActivity(s=>!s); setScheduleForm({ ...scheduleForm, templateId: '', title:'', description:'', dueAt:'', dailyReminder:false }); }} className="px-3 py-1 bg-indigo-600 rounded text-white">{showAddActivity ? 'Close' : 'Add activity'}</button>
                     </div>
                   </div>
-                  <div className="text-sm text-gray-400 mb-2">Scheduled activities for {patientName(selectedPatientId)} (sorted by date)</div>
+                  <div className="text-sm text-gray-400 mb-2">Assigned activities for {patientName(selectedPatientId)} (practice and scheduled, sorted by date)</div>
                   <ul className="space-y-2 mb-3">
                     {patientExercises.slice().sort((a,b)=> new Date(a.dueAt||0) - new Date(b.dueAt||0)).map((ex)=> (
                       <li key={ex._id} className="p-2 bg-gray-800 rounded">
                         <div className="font-medium">{ex.title} {ex.dailyReminder ? <span className="text-xs text-gray-300 ml-2">(daily)</span> : null}</div>
                         <div className="text-xs text-gray-400">{ex.description}</div>
-                        <div className="text-xs text-gray-500">Due: {ex.dueAt ? new Date(ex.dueAt).toLocaleString() : 'No date'}</div>
+                        <div className="text-xs text-gray-500">
+                          {ex.dueAt ? `Scheduled: ${new Date(ex.dueAt).toLocaleString()}` : 'Practice (no date)'}
+                        </div>
                       </li>
                     ))}
-                    {patientExercises.length === 0 && <li className="text-gray-400">No scheduled activities.</li>}
+                    {patientExercises.length === 0 && <li className="text-gray-400">No activities assigned.</li>}
                   </ul>
                   {showAddActivity && (
                     <div className="p-3 bg-gray-800 rounded">
@@ -300,10 +338,22 @@ export default function Exercises() {
                             <option value="custom">Custom</option>
                           </select>
                         </label>
-                        <label className="text-sm">Due date
-                          <input type="date" min={new Date().toISOString().slice(0,10)} value={scheduleForm.dueAt||''} onChange={e=>setScheduleForm({...scheduleForm, dueAt:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                        <label className="text-sm">Timing
+                          <select
+                            value={scheduleForm.scheduleType}
+                            onChange={e=>setScheduleForm({ ...scheduleForm, scheduleType: e.target.value, dueAt: e.target.value === 'practice' ? '' : scheduleForm.dueAt })}
+                            className="w-full p-2 bg-gray-700 rounded mt-1"
+                          >
+                            <option value="practice">Practice</option>
+                            <option value="scheduled">Scheduled</option>
+                          </select>
                         </label>
                       </div>
+                      {scheduleForm.scheduleType === 'scheduled' && (
+                        <label className="text-sm mt-2">Due date
+                          <input type="date" min={new Date().toISOString().slice(0,10)} value={scheduleForm.dueAt||''} onChange={e=>setScheduleForm({...scheduleForm, dueAt:e.target.value})} className="w-full p-2 bg-gray-700 rounded mt-1" />
+                        </label>
+                      )}
                       {scheduleForm.mode === 'template' ? (
                         <div className="mt-2">
                           <label className="text-sm">Template
@@ -363,21 +413,25 @@ export default function Exercises() {
   };
 
   const [showAddActivity, setShowAddActivity] = useState(false);
-  const [scheduleForm, setScheduleForm] = useState({ mode: 'template', templateId: '', title: '', description: '', dueAt: '', dailyReminder: false, assignmentType: 'exercise' });
+  const [scheduleForm, setScheduleForm] = useState({ mode: 'template', templateId: '', title: '', description: '', dueAt: '', dailyReminder: false, assignmentType: 'exercise', scheduleType: 'scheduled' });
 
   const createActivityForPatientFromTemplate = async () => {
     if (!selectedPatientId) return push('Select a patient', 'error');
     if (!scheduleForm.templateId) return push('Select a template', 'error');
-    if (!scheduleForm.dueAt) return push('Pick a due date', 'error');
-    const d = new Date(scheduleForm.dueAt);
-    const today = new Date(); today.setHours(0,0,0,0);
-    if (d < today) return push('Cannot schedule on a past date', 'error');
+    const isScheduled = scheduleForm.scheduleType === 'scheduled';
+    if (isScheduled && !scheduleForm.dueAt) return push('Pick a due date', 'error');
+    if (isScheduled) {
+      const d = new Date(scheduleForm.dueAt);
+      const today = new Date(); today.setHours(0,0,0,0);
+      if (d < today) return push('Cannot schedule on a past date', 'error');
+    }
     try {
-      const body = { assignedTo: [selectedPatientId], overrides: { title: scheduleForm.title || undefined, description: scheduleForm.description || undefined }, dueAt: scheduleForm.dueAt || undefined, dailyReminder: !!scheduleForm.dailyReminder };
+      const body = { assignedTo: [selectedPatientId], overrides: { title: scheduleForm.title || undefined, description: scheduleForm.description || undefined }, dailyReminder: !!scheduleForm.dailyReminder };
+      if (isScheduled && scheduleForm.dueAt) body.dueAt = scheduleForm.dueAt;
       const res = await authFetch(`http://localhost:5000/api/templates/${scheduleForm.templateId}/instantiate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json();
       if (data.success) {
-        push('Scheduled activity created', 'success');
+        push(`${isScheduled ? 'Scheduled' : 'Practice'} activity created`, 'success');
         setShowAddActivity(false);
         fetchExercises();
       } else {
@@ -389,16 +443,20 @@ export default function Exercises() {
   const createCustomActivityForPatient = async () => {
     if (!selectedPatientId) return push('Select a patient', 'error');
     if (!scheduleForm.title || scheduleForm.title.length < 3) return push('Provide a title', 'error');
-    if (!scheduleForm.dueAt) return push('Pick a due date', 'error');
-    const d = new Date(scheduleForm.dueAt);
-    const today = new Date(); today.setHours(0,0,0,0);
-    if (d < today) return push('Cannot schedule on a past date', 'error');
+    const isScheduled = scheduleForm.scheduleType === 'scheduled';
+    if (isScheduled && !scheduleForm.dueAt) return push('Pick a due date', 'error');
+    if (isScheduled) {
+      const d = new Date(scheduleForm.dueAt);
+      const today = new Date(); today.setHours(0,0,0,0);
+      if (d < today) return push('Cannot schedule on a past date', 'error');
+    }
     try {
-      const body = { title: scheduleForm.title, description: scheduleForm.description, assignedTo: [selectedPatientId], dueAt: scheduleForm.dueAt || undefined, dailyReminder: !!scheduleForm.dailyReminder, metadata: { assignmentType: scheduleForm.assignmentType } };
+      const body = { title: scheduleForm.title, description: scheduleForm.description, assignedTo: [selectedPatientId], dailyReminder: !!scheduleForm.dailyReminder, metadata: { assignmentType: scheduleForm.assignmentType } };
+      if (isScheduled && scheduleForm.dueAt) body.dueAt = scheduleForm.dueAt;
       const res = await authFetch('http://localhost:5000/api/exercises', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json();
       if (data.success) {
-        push('Scheduled custom activity created', 'success');
+        push(`${isScheduled ? 'Scheduled' : 'Practice'} custom activity created`, 'success');
         setShowAddActivity(false);
         fetchExercises();
       } else {
@@ -453,7 +511,7 @@ export default function Exercises() {
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
               <div>
                 <div className="text-lg font-semibold">Assign from template</div>
-                <p className="text-sm text-gray-400">Pick a template, choose patients, optionally set due date and daily reminders.</p>
+                <p className="text-sm text-gray-400">Pick a template, choose patients, and set it as practice or scheduled (with optional reminders).</p>
               </div>
               <Link to="/templates" className="bg-gray-700 text-white px-3 py-2 rounded">Manage templates</Link>
             </div>
@@ -555,11 +613,38 @@ export default function Exercises() {
                 <input value={assign.overrides.metadata?.vulnerabilityTags || ''} onChange={(e)=>setAssign({...assign, overrides:{...assign.overrides, metadata:{...(assign.overrides.metadata||{}), vulnerabilityTags: e.target.value}}})} className="w-full p-2 bg-gray-700 rounded mt-1" />
               </label>
             </div>
+            <div className="mt-3">
+              <div className="text-sm text-gray-300 mb-1">Timing</div>
+              <div className="flex items-center gap-4 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="assign-timing"
+                    value="practice"
+                    checked={assign.scheduleType === 'practice'}
+                    onChange={() => setAssign({ ...assign, scheduleType: 'practice', dueAt: '' })}
+                  />
+                  Practice
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="assign-timing"
+                    value="scheduled"
+                    checked={assign.scheduleType === 'scheduled'}
+                    onChange={() => setAssign({ ...assign, scheduleType: 'scheduled' })}
+                  />
+                  Scheduled
+                </label>
+              </div>
+            </div>
             <div className="flex items-center gap-3 mt-3">
-              <label className="text-sm flex items-center gap-2">
-                Due date
-                <input type="date" min={new Date().toISOString().slice(0,10)} value={assign.dueAt || ''} onChange={(e)=>setAssign({...assign, dueAt: e.target.value})} className="p-2 bg-gray-700 rounded" />
-              </label>
+              {assign.scheduleType === 'scheduled' && (
+                <label className="text-sm flex items-center gap-2">
+                  Due date
+                  <input type="date" min={new Date().toISOString().slice(0,10)} value={assign.dueAt || ''} onChange={(e)=>setAssign({...assign, dueAt: e.target.value})} className="p-2 bg-gray-700 rounded" />
+                </label>
+              )}
               <label className="text-sm flex items-center gap-2">
                 <input type="checkbox" checked={!!assign.dailyReminder} onChange={(e)=>setAssign({...assign, dailyReminder: e.target.checked})} /> Daily reminder
               </label>
@@ -586,16 +671,27 @@ export default function Exercises() {
             </div>
             <div className="mt-4 p-3 bg-gray-900 rounded">
               <div className="text-sm font-semibold mb-2">Auto-allocate based on vulnerabilities</div>
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex flex-wrap items-center gap-2 mb-2">
                 <input placeholder="Optional tags (comma separated)" value={autoAlloc.vulnerabilities || ''} onChange={e=>setAutoAlloc({...autoAlloc, vulnerabilities: e.target.value})} className="bg-gray-700 p-2 rounded text-sm mr-2" />
                 <select value={autoAlloc.patientId} onChange={e=>setAutoAlloc({...autoAlloc, patientId: e.target.value})} className="bg-gray-700 p-2 rounded text-sm">
                   <option value="">Select patient</option>
                   {patients.map(p=> <option key={p._id} value={p._id}>{p.name}</option>)}
                 </select>
+                <select value={autoAlloc.scheduleType} onChange={e=>setAutoAlloc({ ...autoAlloc, scheduleType: e.target.value, dueAt: e.target.value === 'practice' ? '' : autoAlloc.dueAt })} className="bg-gray-700 p-2 rounded text-sm">
+                  <option value="practice">Practice</option>
+                  <option value="scheduled">Scheduled</option>
+                </select>
+                {autoAlloc.scheduleType === 'scheduled' && (
+                  <input type="date" min={new Date().toISOString().slice(0,10)} value={autoAlloc.dueAt || ''} onChange={e=>setAutoAlloc({ ...autoAlloc, dueAt: e.target.value })} className="bg-gray-700 p-2 rounded text-sm" />
+                )}
                 <button onClick={runAutoAllocate} className="bg-indigo-600 px-3 py-2 rounded text-sm">Auto-allocate</button>
               </div>
+              <label className="flex items-center gap-2 text-xs text-gray-400 mb-1">
+                <input type="checkbox" checked={!!autoAlloc.allowDuplicates} onChange={e=>setAutoAlloc({ ...autoAlloc, allowDuplicates: e.target.checked })} />
+                Allow repeat templates
+              </label>
               {autoAlloc.status && <div className="text-xs text-gray-300">{autoAlloc.status}</div>}
-              <div className="text-[11px] text-gray-400">Uses patient vulnerability tags and template vulnerability tags to assign up to 3 best matches.</div>
+              <div className="text-[11px] text-gray-400">Choose Practice for immediate access or Scheduled to lock until the due date. Uses patient vulnerability tags and template vulnerability tags to assign up to 3 best matches.</div>
               {lastMatches && lastMatches.length > 0 && (
                 <div className="mt-3 p-2 bg-gray-800 rounded">
                   <div className="font-semibold text-sm mb-1">Last auto-allocate matches</div>
