@@ -11,14 +11,15 @@ export default function PatientCalendar() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await authFetch('http://localhost:5000/api/calendar/patient');
+      const query = `?month=${month + 1}&year=${year}`;
+      const res = await authFetch(`http://localhost:5000/api/calendar/patient${query}`);
       const data = await res.json();
       if (data.success) setItems(data.items || []);
     } catch (e) {
       console.error('calendar load', e);
     }
     setLoading(false);
-  }, [authFetch]);
+  }, [authFetch, month, year]);
 
   useEffect(() => { load(); }, [load]);
 

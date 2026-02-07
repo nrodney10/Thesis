@@ -1,6 +1,31 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 
+const normalizeTitle = (value) => String(value || '').trim().toLowerCase();
+const getAssignmentKey = (ex) => {
+  const assignmentType = String(ex?.metadata?.assignmentType || 'exercise').toLowerCase();
+  const templateId = ex?.templateId ? String(ex.templateId) : '';
+  if (templateId) return `${assignmentType}:template:${templateId}`;
+  const gameKey = String(ex?.metadata?.gameKey || '').toLowerCase();
+  const poseType = String(ex?.metadata?.poseType || ex?.metadata?.poseMetrics?.poseType || '').toLowerCase();
+  const title = normalizeTitle(ex?.title);
+  if (assignmentType === 'game') return `${assignmentType}:${gameKey || title}`;
+  return `${assignmentType}:${poseType || title}`;
+};
+const dedupeByKey = (list, keyFn) => {
+  const map = new Map();
+  (list || []).forEach((item) => {
+    const key = keyFn(item);
+    if (!key) return;
+    const prev = map.get(key);
+    if (!prev) { map.set(key, item); return; }
+    const prevTime = prev?.createdAt ? new Date(prev.createdAt).getTime() : 0;
+    const nextTime = item?.createdAt ? new Date(item.createdAt).getTime() : 0;
+    if (nextTime > prevTime) map.set(key, item);
+  });
+  return Array.from(map.values());
+};
+
 export default function TherapistCalendar() {
   const { authFetch } = useAuth();
   const [items, setItems] = useState([]);
@@ -19,15 +44,16 @@ export default function TherapistCalendar() {
     setLoading(true);
     try {
       let res;
-      if (patientId) res = await authFetch(`http://localhost:5000/api/calendar/patient/${patientId}`);
-      else res = await authFetch('http://localhost:5000/api/calendar/therapist');
+      const query = `?month=${month + 1}&year=${year}`;
+      if (patientId) res = await authFetch(`http://localhost:5000/api/calendar/patient/${patientId}${query}`);
+      else res = await authFetch(`http://localhost:5000/api/calendar/therapist${query}`);
       const data = await res.json();
       if (data.success) setItems(data.items || []);
     } catch (e) {
       console.error('calendar therapist load', e);
     }
     setLoading(false);
-  }, [authFetch]);
+  }, [authFetch, month, year]);
 
   useEffect(() => { load(selectedPatient); }, [selectedPatient, load]);
 
@@ -48,8 +74,9 @@ export default function TherapistCalendar() {
         const j = await res.json();
         if (j.success) {
           const all = j.exercises || [];
-          const games = all.filter(ex => (ex.metadata?.assignmentType || '').toLowerCase() === 'game');
-          const exercises = all.filter(ex => (ex.metadata?.assignmentType || '').toLowerCase() !== 'game');
+          const unique = dedupeByKey(all, getAssignmentKey).sort((a, b) => normalizeTitle(a.title).localeCompare(normalizeTitle(b.title)));
+          const games = unique.filter(ex => (ex.metadata?.assignmentType || '').toLowerCase() === 'game');
+          const exercises = unique.filter(ex => (ex.metadata?.assignmentType || '').toLowerCase() !== 'game');
           setExistingGames(games);
           setExistingExercises(exercises);
         }
@@ -254,11 +281,23 @@ export default function TherapistCalendar() {
           {cells.map((c, idx) => {
             if (!c) return <div key={idx} />;
             const k = c.toDateString();
-            const has = grouped[k]?.length;
+            const dayItems = grouped[k] || [];
+            const has = dayItems.length;
+            const preview = dayItems.slice(0, 2);
+            const remaining = dayItems.length - preview.length;
             return (
               <div key={idx} className={`rounded-lg p-2 h-20 border ${has ? 'border-indigo-400 bg-indigo-50 text-indigo-900' : 'border-gray-700 bg-gray-800 text-gray-200'}`}>
                 <div className="text-right text-sm font-semibold">{c.getDate()}</div>
-                {has ? <div className="text-xs">{has} item{has>1?'s':''}</div> : null}
+                {has ? (
+                  <div className="mt-1 space-y-1">
+                    {preview.map((it, i) => (
+                      <div key={it.id || it._id || `${k}-${i}`} className="text-[11px] truncate">{it.title || 'Activity'}</div>
+                    ))}
+                    {remaining > 0 && (
+                      <div className="text-[11px] text-indigo-700">+{remaining} more</div>
+                    )}
+                  </div>
+                ) : null}
               </div>
             );
           })}
