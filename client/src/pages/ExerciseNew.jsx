@@ -34,7 +34,7 @@ export default function ExerciseNew() {
     };
     load();
 
-  }, []);
+  }, [authFetch]);
 
   const submit = async () => {
     try {
