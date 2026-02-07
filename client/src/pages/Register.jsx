@@ -117,15 +117,13 @@ export default function Register() {
           />
         </div>
         <div className="mb-4">
-          <label className="block text-sm text-gray-300 mb-1">Age (calculated)</label>
+          <label className="block text-sm text-gray-300 mb-1">Age</label>
           <input
             type="number"
             value={computedAge}
             readOnly
             className="w-full bg-transparent border-b border-gray-700 px-4 py-2 text-gray-400"
-            placeholder="Age will appear after selecting DOB"
           />
-          <div className="text-xs text-gray-500 mt-1">Age is calculated from your date of birth and cannot be changed later.</div>
         </div>
 
         <input
