@@ -6,7 +6,7 @@ This is a full-stack app with a React client and a Node/Express server. It helps
 
 Overview
 
-The repository has a React frontend in the 'client/' folder and a Node/Express backend in the 'server/' folder. The backend stores data in MongoDB and can connect to Fitbit if you want.
+The repository has a React frontend in the 'client/' folder and a Node/Express backend in the 'server/' folder. The backend stores data in MongoDB and can connect to Fitbit.
 
 
 
