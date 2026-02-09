@@ -13,7 +13,6 @@ The repository has a React frontend in the 'client/' folder and a Node/Express b
 Prerequisites
 
 Node.js and npm. Install from the official site: https://nodejs.org/
-MongoDB (local or Atlas)
 If you already have the 'node_modules' folders, you don't need to run 'npm install' unless you want to update the dependencies.
 
 
