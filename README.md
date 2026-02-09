@@ -14,10 +14,7 @@ Prerequisites
 
 Node.js and npm. Install from the official site: https://nodejs.org/
 MongoDB (local or Atlas)
-Fitbit developer credentials for Fitbit integration
-
-If you already have the 'node\_modules' folders, you don't need to run 'npm install' unless you want to update the dependencies.
-
+If you already have the 'node_modules' folders, you don't need to run 'npm install' unless you want to update the dependencies.
 
 
 Repository layout
@@ -25,46 +22,12 @@ Repository layout
 'server/': Node/Express backend with API routes, models, and scripts
 'client/': React frontend built with Create React App
 
-
-
-Environment variables
-
-Create a ‘.env’ file in the ‘server/’ folder with:
-
-MONGO\_URI=
-JWT\_SECRET=
-PORT=5000
-FITBIT\_CLIENT\_ID=
-FITBIT\_CLIENT\_SECRET=
-FITBIT\_CALLBACK\_URL=https://your-app/callback
-
-
-
-Quick MongoDB Atlas setup:
-
-1. Create a free Atlas account and a new cluster: https://www.mongodb.com/atlas
-2. Create a database user and whitelist your IP (or allow access from anywhere during development).
-3. Get the connection string for your cluster, put in your credentials and database name, and use it for 'MONGO\_URI'.
-
-Fitbit developer setup:
-
-1. Register a new app at the Fitbit developer portal: https://dev.fitbit.com/apps/new
-2. Once you register, you'll get a 'Client ID' and 'Client Secret'.
-3. When you register, set the redirect or callback URL to 'http://localhost:5000/api/fitbit/callback' or use your app's URL.
-4. Add 'FITBIT\_CLIENT\_ID', 'FITBIT\_CLIENT\_SECRET', and 'FITBIT\_CALLBACK\_URL' to your 'server/.env' file.
-
-
-
 Install
 
 To install dependencies for both the server and client, start from the repository root:
 
-
-
 cd server
 npm install
-
-
 
 cd client
 npm install
@@ -79,16 +42,12 @@ Start the backend and frontend in two separate terminal windows.
 
 Backend (nodemon recommended):
 
-
-
 cd server
 npm run dev
 
 
 
 Frontend:
-
-
 
 cd client
 npm start
