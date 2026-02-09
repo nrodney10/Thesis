@@ -8,16 +8,16 @@ This repository contains a React frontend (in 'client/') and a Node/Express back
 
 ## Prerequisites
 
-- Node.js and npm. Install from the official site: https://nodejs.org/
-- MongoDB (local or Atlas)
-- Fitbit developer credentials for Fitbit integration
+Node.js and npm. Install from the official site: https://nodejs.org/
+MongoDB (local or Atlas)
+Fitbit developer credentials for Fitbit integration
 
 Note: If the 'node_modules' directories are already present you do not need to run 'npm install' unless you want to update dependencies.
 
 ## Repository layout
 
-- 'server/' — Node/Express backend, API routes, models, and scripts
-- 'client/' — React frontend (Create React App)
+'server/' — Node/Express backend, API routes, models, and scripts
+'client/' — React frontend (Create React App)
 
 ## Environment variables
 
